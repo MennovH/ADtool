@@ -1,0 +1,1 @@
+CreateObject("Wscript.Shell").Run("powershell.exe -WindowStyle Hidden -File .\ADtool.ps1"),0
