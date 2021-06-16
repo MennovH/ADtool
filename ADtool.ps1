@@ -5,7 +5,6 @@
 
 $get_comp = Get-ADComputer $env:COMPUTERNAME -Properties OperatingSystem
 if ($get_comp.OperatingSystem -like "*Windows Server 2008 R2*" -or $get_comp.OperatingSystem -like "*Windows 7*") {
-    #Add-Type -AssemblyName Microsoft.VisualBasic
     $MessageBody = "Due to the Operating system, some actions (e.g. unlocking AD users) may not work. The error message could look like:`n`n'Failed to unlock user account. Insufficient access rights to perform the operation.'`n`nIn order to fix this, one must update the operating system, or install a hotfix from Microsoft. Otherwise, it's necessary to perform these actions via Active Directory..."
     $MessageTitle = "Information"
     [Microsoft.VisualBasic.Interaction]::MsgBox($MessageBody,'OkOnly,SystemModal,Critical',$MessageTitle) | Out-Null
@@ -59,7 +58,6 @@ function save {
             }
         }
         if ($removelist.Count -gt 0 -or $addlist.Count -gt 0) {
-            #Add-Type -AssemblyName Microsoft.VisualBasic
             $MessageBody = "Proceed with the following role update(s)?`n`nAdd ($($addlist.Count))" + $(if($addlist.Count -gt 0) {":`n$($addlist | Out-String)"} else {"`n"}) + "`nRemove ($($removelist.Count))" + $(if($removelist.Count -gt 0) {":`n$($removelist | Out-String)"})
             $MessageTitle = "Confirm choice"
             $Result = [Microsoft.VisualBasic.Interaction]::MsgBox($MessageBody,'YesNo,DefaultButton2,SystemModal,Critical',$MessageTitle)
@@ -99,7 +97,7 @@ function save {
     $StatusLabel.Visible = $true
     try{
         if ($NewPasswordTextBox.Text.Length -gt 0) {
-            if ($RestoreRadioButton.Checked -and $OldPasswordTextBox.Text.Length -gt 0 -and $OldPasswordTextBox.Text -ne "Enter old password") {
+            if ($RestoreRadioButton.Checked -and $OldPasswordTextBox.Text.Length -gt 0) {
                 #restore password
                 $type = "restore"
                 $job = (Start-Job -Name RestorePassword -ScriptBlock {param($arg0,$arg1,$arg2); Set-ADAccountPassword -Identity $arg0 -OldPassword (ConvertTo-SecureString -AsPlainText $arg1 -Force) -NewPassword (ConvertTo-SecureString -AsPlainText $arg2 -Force)} -ArgumentList $UsernameTextbox.Text, $OldPasswordTextBox.Text, $NewPasswordTextBox.Text) | Wait-Job
@@ -145,7 +143,6 @@ function save {
         } else {
             $dgv.CurrentRow.Cells['Password expires'].Value = $status.PasswordLastSet
         }
-
         $total = $results.Values | Out-string
         if ($errors.Count -gt 0 -and $total.Length -ne 0) {$total += "`n"}
         $total += $errors.Values | Out-string
@@ -164,7 +161,6 @@ function save {
             $StatusLabel.ForeColor = "Black"
             $StatusLabel.BackColor = "Lightgreen"
         }
-        #$StatusLabel.FlatAppearance.BorderColor = "Black"
         $StatusLabel.FlatAppearance.BorderSize = 1
         $StatusLabel.Text = "Show report"
         $StatusLabelTotal.Text = $total
@@ -397,18 +393,8 @@ function refresh {
 
 function refresh_group {
     $BlockLabel.Text = "x"
-    if ($SearchUserTextBox.Text.Replace("*","").Length -eq 0) {$SearchVal = "*"} else {$SearchVal = "*$($SearchUserTextBox.Text)*"}
-    #$UserRolesGrid.Visible = $UserPropertiesGrid.Visible = $false
-    #$UserGrid.Visible = $true
-    #$InfoButton.Text = " i"
-
-    
-    if (!(Test-Path variable:$GroupinfoImage)){
-        $InfoGroupButton.Image = $GroupinfoImage
-    } else {
-        $InfoGroupButton.Text = " i"
-    }
-
+    if ($SearchUserTextBox.Text.Replace("*","").Length -eq 0) {$SearchVal = "*"} else {$SearchVal = "*$($SearchUserTextBox.Text)*"}    
+    if (!(Test-Path variable:$GroupinfoImage)){$InfoGroupButton.Image = $GroupinfoImage} else {$InfoGroupButton.Text = " i"}
     $GroupGrid_QueryLabel.Text = "Preparing fetch"
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $stopwatch.Start()
@@ -576,10 +562,8 @@ function start-script{
     $form.StartPosition = "CenterScreen"
     $Font = New-Object System.Drawing.Font("Calibri",11)
     $form.Font = $Font
-    #$form.TopMost = $true
     $form.AutoSize = $true
     $form.Width = 744
-    #$form.Height = 516
     $form.FormBorderStyle = 'FixedDialog'
     $form.MaximizeBox = $false
 
@@ -599,16 +583,12 @@ function start-script{
     $UserPropertiesGrid.Size=New-Object System.Drawing.Size($UserGrid.Size)
     $UserPropertiesGrid.Visible = $false
     $UserPropertiesGrid.Dock = 'Top'
-
     $form.Controls.Add($UserPropertiesGrid)
 
     $CopyButton = New-Object System.Windows.Forms.Label
-    #$CopyButton.Font = New-Object System.Drawing.Font("Calibri Light",8,[System.Drawing.FontStyle]::Regular)
     $CopyButton.Location = New-Object System.Drawing.Size($((($UserGrid.Width-264)*3/4)-30),$($UserPropertiesGrid.Top +4))
     $CopyButton.Size = New-Object System.Drawing.Size(20,20)
-    #$CopyButton.Text = "Copy"
     $CopyButton.Image = $copyImage
-    #$CopyButton.FlatStyle = "Flat"
     $CopyButton.Visible = $false
     $CopyButton.Cursor = "Hand"
     $CopyButton.Add_Click({
@@ -619,12 +599,9 @@ function start-script{
     $CopyButton.BringToFront()
     
     $PasteButton = New-Object System.Windows.Forms.Label
-    #$PasteButton.Font = New-Object System.Drawing.Font("Calibri Light",8,[System.Drawing.FontStyle]::Regular)
     $PasteButton.Location = New-Object System.Drawing.Size($($CopyButton.Right+4),$($UserPropertiesGrid.Top +4))
     $PasteButton.Size = New-Object System.Drawing.Size(20,20)
-    #$PasteButton.Text = "Paste"
     $PasteButton.Image = $pasteImage
-    #$PasteButton.FlatStyle = "Flat"
     $PasteButton.Cursor = "Hand"
     $PasteButton.Visible = $false
     $PasteButton.Add_Click({
@@ -647,6 +624,9 @@ function start-script{
     $BottomPanel.BackColor = "Transparent"
     $form.Controls.Add($BottomPanel)
 
+    #$UsernameLabel = New-Object System.Windows.Forms.Label
+    #$UsernameLabel.Location = New-Object System.Drawing.Size(4,5)
+    #$UsernameLabel.Size = New-Object System.Drawing.Size(50,24)
     $UsernameLabel = New-Object System.Windows.Forms.Button
     $UsernameLabel.Location = New-Object System.Drawing.Size(0, 2)
     $UsernameLabel.Size = New-Object System.Drawing.Size(55,25)
@@ -684,14 +664,7 @@ function start-script{
                 $SearchGroupTextBox.Focus()
             }
         }
-
-
-
-        #$Group.Visible = $($AdminUpdate.BackColor -eq "Transparent")
-        #$SearchLabel.Visible = $UserTypeCheckBox.Visible = $SearchUserTextBox.Visible = !$($AdminUpdate.BackColor -eq "Transparent")
-        #if ($AdminUpdate.BackColor -eq "Transparent") {$AdminUpdate.BackColor = "Yellow"; $AdminUpdate.Text = "Back"} else {$AdminUpdate.BackColor = "Transparent"; $AdminUpdate.Text = "Set"}
     })
-
     $BottomPanel.Controls.Add($UsernameLabel)
     
     $UsernameTextbox = New-Object System.Windows.Forms.TextBox
@@ -768,11 +741,7 @@ function start-script{
             foreach ($i in $status) {
                 $AllMembers.Rows.Add($i.Name, $i.SamAccountName)
             }
-            #if ($MemberButton.Text -eq "Members") {$MemberButton.Text = "Reload"}
-
-
             $AllMembers.Visible = $NewMembers.Visible = $true
-            #$SearchRoleTextBox.Focus()
             $ToolTip.SetToolTip($InfoGroupButton, "Return")
         } else {
             $InfoGroupButton.Text = ""
@@ -1072,7 +1041,6 @@ function start-script{
             $AllRoles.Rows.Clear()
             $form.Update()
             if ($SearchRoleTextBox.Text.Length -lt 3) {
-                #Add-Type -AssemblyName Microsoft.VisualBasic
                 $MessageBody = "This query could take more than 2 minutes!`n`nContinue?"
                 $MessageTitle = "Confirm choice"
                 $Result = [Microsoft.VisualBasic.Interaction]::MsgBox($MessageBody,'OkCancel,DefaultButton2,SystemModal,Critical',$MessageTitle)
@@ -1139,7 +1107,6 @@ function start-script{
             }
         }
         if ($removelist.Count -gt 0 -or $addlist.Count -gt 0) {
-            #Add-Type -AssemblyName Microsoft.VisualBasic
             $MessageBody = "Current overview:`n`nAdd ($($addlist.Count))" + $(if($addlist.Count -gt 0) {":`n$($addlist | Out-String)"} else {"`n"}) + "`nRemove ($($removelist.Count))" + $(if($removelist.Count -gt 0) {":`n$($removelist | Out-String)"})
             $MessageTitle = "Confirm choice"
             [Microsoft.VisualBasic.Interaction]::MsgBox($MessageBody,'OkOnly,SystemModal,Information',$MessageTitle)
@@ -1429,7 +1396,6 @@ function start-script{
     $SearchUserTextBox.Add_KeyDown({
         if ($_.KeyCode -eq "Enter"){
             if ($SearchUserTextBox.Text.Length -lt 3 -and !$UserTypeCheckBox.Checked) {
-                #Add-Type -AssemblyName Microsoft.VisualBasic
                 $MessageBody = "This query could take more than 2 minutes!`n`nContinue?"
                 $MessageTitle = "Confirm choice"
                 $Result = [Microsoft.VisualBasic.Interaction]::MsgBox($MessageBody,'OkCancel,DefaultButton2,SystemModal,Critical',$MessageTitle)
@@ -1478,7 +1444,6 @@ function start-script{
     $SearchGroupTextBox.Add_KeyDown({
         if ($_.KeyCode -eq "Enter"){
             if ($SearchGroupTextBox.Text.Length -lt 3) {
-                #Add-Type -AssemblyName Microsoft.VisualBasic
                 $MessageBody = "This query could take more than 2 minutes!`n`nContinue?"
                 $MessageTitle = "Confirm choice"
                 $Result = [Microsoft.VisualBasic.Interaction]::MsgBox($MessageBody,'OkCancel,DefaultButton2,SystemModal,Critical',$MessageTitle)
@@ -1503,7 +1468,6 @@ function start-script{
     $SearchGroupEnter.Visible = $true
     $SearchGroupEnter.Add_Click({
         if ($SearchGroupTextBox.Text.Length -lt 3) {
-            #Add-Type -AssemblyName Microsoft.VisualBasic
             $MessageBody = "This query could take more than 2 minutes!`n`nContinue?"
             $MessageTitle = "Confirm choice"
             $Result = [Microsoft.VisualBasic.Interaction]::MsgBox($MessageBody,'OkCancel,DefaultButton2,SystemModal,Critical',$MessageTitle)
@@ -1540,7 +1504,6 @@ function start-script{
     $SearchEnterButton.Visible = $true
     $SearchEnterButton.Add_Click({
         if ($SearchUserTextBox.Text.Length -lt 3 -and !$UserTypeCheckBox.Checked) {
-            #Add-Type -AssemblyName Microsoft.VisualBasic
             $MessageBody = "This query could take more than 2 minutes!`n`nContinue?"
             $MessageTitle = "Confirm choice"
             $Result = [Microsoft.VisualBasic.Interaction]::MsgBox($MessageBody,'OkCancel,DefaultButton2,SystemModal,Critical',$MessageTitle)
@@ -1589,16 +1552,6 @@ function start-script{
         if ($UserTypeCheckBox.Checked -and $UserTypeCheckBox.Text -eq "!") {$UserTypeCheckBox.Visible = $false; $AdminTextBox.Focus();  $AdminUpdate.BackColor = "Yellow"}
     })
     $TopPanel.Controls.Add($UserTypeCheckBox)
-    
-    #$TopMostChckbx = New-Object System.Windows.Forms.CheckBox
-    #$TopMostChckbx.Location = New-Object System.Drawing.Size(4,$UserTypeCheckBox.Location.Y)
-    #$TopMostChckbx.Size = New-Object System.Drawing.Size(50,25)
-    #$TopMostChckbx.Text = "Top"
-    #$TopMostChckbx.Checked = $true
-    #$TopMostChckbx.Add_CheckStateChanged({
-    #    $form.TopMost = $TopMostChckbx.Checked
-    #})
-    #$TopPanel.Controls.Add($TopMostChckbx)
     
     $ClearSearch = New-Object System.Windows.Forms.Label
     $ClearSearch.Location = New-Object System.Drawing.Size(0,2)
@@ -1741,7 +1694,6 @@ function start-script{
     $StatusLabel.FlatStyle = "Flat"
     $StatusLabel.Add_Click({
         if ($StatusLabel.Text.Length -gt 0) {
-            #Add-Type -AssemblyName Microsoft.VisualBasic
             $MessageBody = $StatusLabelTotal.Text
             $MessageTitle = "Status report"
             $Result = [Microsoft.VisualBasic.Interaction]::MsgBox($MessageBody,'SystemModal,Information',$MessageTitle)
@@ -1765,7 +1717,7 @@ function start-script{
     })
 
     $ResetRadioButton = New-Object System.Windows.Forms.RadioButton
-    $ResetRadioButton.Location = New-Object System.Drawing.Size($RestoreRadioButton.Location.X, $SearchUserTextBox.Location.Y)
+    $ResetRadioButton.Location = New-Object System.Drawing.Size($RestoreRadioButton.Location.X, $($SearchUserTextBox.Location.Y-1))
     $ResetRadioButton.Size = New-Object System.Drawing.Size($RestoreRadioButton.Size)
     $ResetRadioButton.Text = "Reset"
     $ResetRadioButton.Visible = $false
@@ -1790,9 +1742,6 @@ function start-script{
         if ($EnableCheckBox.Text -ne ""){
             check
         }
-        #$OldPasswordTextBox.Visible = !$EnableCheckBox.Checked
-        #check
-        #$NewPasswordTextBox.Focus()
     })
 
     $NewPasswordTextBox = New-Object System.Windows.Forms.TextBox
@@ -1847,7 +1796,7 @@ function start-script{
     $NewPassLabel.Text = "Enter new password"
     $NewPassLabel.TextAlign = "MiddleCenter"
     $NewPassLabel.BackColor = "Transparent"
-    $NewPassLabel.ForeColor = "Blue"
+    $NewPassLabel.ForeColor = "Black"
     $NewPassLabel.Add_Click({
         $NewPassLabel.Visible = $false
         $NewPasswordTextBox.Focus()
@@ -1880,7 +1829,6 @@ function start-script{
             $OldPassLabel.Visible = $true
         }
     })
-
     $TopPanel.Controls.Add($OldPasswordTextBox)
     
     $ShowHideOldPassLabel = New-Object System.Windows.Forms.Label
@@ -1907,7 +1855,7 @@ function start-script{
     $OldPassLabel.Text = "Enter old password"
     $OldPassLabel.TextAlign = "MiddleCenter"
     $OldPassLabel.BackColor = "Transparent"
-    $OldPassLabel.ForeColor = "Blue"
+    $OldPassLabel.ForeColor = "Black"
     $OldPassLabel.Add_Click({
         $OldPassLabel.Visible = $false
         $OldPasswordTextBox.Focus()
@@ -1936,11 +1884,11 @@ function start-script{
             $RoleButton.Text = "R"
         }
         if($InfoButton.Text -ne "⤴") {
+            fetch_info
             $InfoButton.Image = $null
             $InfoButton.Text = "⤴";
             $UserGrid.Visible = $UserRolesGrid.Visible = $false
             $UserPropertiesGrid.Visible = $true
-            fetch_info
             $SearchRoleTextBox.Focus()
             $ToolTip.SetToolTip($InfoButton, "Return")
         } else {
@@ -1960,7 +1908,6 @@ function start-script{
     $UsernameTextbox.Controls.Add($InfoButton)
     
     $RoleButton = New-Object System.Windows.Forms.Label
-    #$RoleButton.Location = New-Object System.Drawing.Size($($UsernameTextbox.Right+2),$UsernameTextbox.Location.Y)
     $RoleButton.Location = New-Object System.Drawing.Size(1,-1)
     $RoleButton.Size = New-Object System.Drawing.Size(22,$SearchRoleTextBox.Height)
     $RoleButton.Font = New-Object System.Drawing.Font("Calibri Light",13,[System.Drawing.FontStyle]::Bold)
@@ -1981,10 +1928,10 @@ function start-script{
             $InfoButton.Text = " i"
         }
         if($RoleButton.Text -ne "⤴") {
+            memberof
             $RoleButton.ForeColor = "Blue";
             $RoleButton.Text = "⤴";
             $RoleButton.Image = $null
-            memberof
             $SearchRoleTextBox.Focus()
             $ToolTip.SetToolTip($RoleButton, "Return")
         } else {
@@ -2120,9 +2067,3 @@ function start-script{
     [void] $form.ShowDialog()
 }
 start-script
-
-#Get-ADComputer -identity lt53639 -Properties *
-
-#$objComputer = Get-ADComputer lt53639
-#$Bitlocker_Object = Get-ADObject -Filter {objectclass -eq 'msFVE-RecoveryInformation'} -SearchBase $objComputer.DistinguishedName -Properties 'msFVE-RecoveryPassword'
-#$Bitlocker_Object
