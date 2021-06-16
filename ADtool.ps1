@@ -98,7 +98,7 @@ function save {
     $StatusLabel.Text = "Processing..."
     $StatusLabel.Visible = $true
     try{
-        if ($NewPasswordTextBox.Text.Length -gt 0 -and $NewPasswordTextBox.Text -ne "Enter new password") {
+        if ($NewPasswordTextBox.Text.Length -gt 0) {
             if ($RestoreRadioButton.Checked -and $OldPasswordTextBox.Text.Length -gt 0 -and $OldPasswordTextBox.Text -ne "Enter old password") {
                 #restore password
                 $type = "restore"
@@ -123,7 +123,7 @@ function save {
             $status = try{Receive-Job -Job $job -ErrorAction Stop} catch {"$_"}
             if ($status -eq $null) {$results.Add($results.Count + 1, "Account disabled: done")} else {$results.Add($results.Count + 1, "Account disabled: failed"); $errors.Add($errors.Count + 1, $status)}
         }
-        if ($SaveButton.Text.ToLower().Contains('unlock')) {
+        if ($SaveButton.Text.ToLower().Contains('unlock') -or ($NewPasswordTextBox.Text.Length -gt 0 -and !$SaveButton.Text.ToLower().Contains('disable'))) {
             #unlock user
             $job = Start-Job -Name UnlockUser -ScriptBlock {param($arg0); Unlock-ADAccount -Identity $arg0} -ArgumentList $UsernameTextbox.Text | Wait-Job
             $status = try{Receive-Job -Job $job -ErrorAction Stop} catch {"$_"}
@@ -191,7 +191,7 @@ function save {
                 1 {$col = "Enabled"}
                 2 {$col = "Locked"}
             }
-            if ($list[$i]) {
+            if ($list[$i] -and $list[$i] -ne $null) {
                 $dgv.SelectedRows[0].Cells[$col].Style.BackColor = "Orange"
                 $dgv.SelectedRows[0].Cells[$col].Style.ForeColor = "Black"
                 $dgv.SelectedRows[0].Cells[$col].Style.SelectionBackColor = "Red"
@@ -221,8 +221,12 @@ function check {
         
         $SaveButton.Text = ""
         $RestoreRadioButton.Visible = $ResetRadioButton.Visible = $RoleButton.Visible = $InfoButton.Visible = $UserRolesGrid.Visible = $UserPropertiesGrid.Visible = $EnableCheckBox.Visible = $false
-        $RoleButton.Text = "Roles"
-        $RoleButton.BackColor = "Lightblue"
+        if (!(Test-Path variable:$userrolesImage)){
+            $RoleButton.Image = $userrolesImage
+        } else {
+            $RoleButton.Text = "R"
+        }
+        $RoleButton.ForeColor = "Black"
         $dgv.Visible = $true
     } else {
         if ($dgv.SelectedRows[0].Cells['Locked'].Value -eq $false) {$locked = $false} else {$locked = $true}
@@ -401,7 +405,6 @@ function refresh_group {
     
     if (!(Test-Path variable:$GroupinfoImage)){
         $InfoGroupButton.Image = $GroupinfoImage
-        write-host "?"
     } else {
         $InfoGroupButton.Text = " i"
     }
@@ -512,7 +515,13 @@ function fetch_info {
             }
         }
     }
-    $CheckBoxButton.Enabled = $false
+    foreach($i in $UserProperties.Rows) {
+        if ($i.Visible) {
+            $i.Selected = $true
+            break
+        }
+    }
+    $CheckBoxButton.Visible = $false
 }
 
 function memberof {
@@ -570,8 +579,9 @@ function start-script{
     #$form.TopMost = $true
     $form.AutoSize = $true
     $form.Width = 744
+    #$form.Height = 516
     $form.FormBorderStyle = 'FixedDialog'
-    $form.MaximizeBox = $False
+    $form.MaximizeBox = $false
 
     $UserGrid = New-Object System.Windows.Forms.GroupBox
     $UserGrid.Size=New-Object System.Drawing.Size(400,400)
@@ -584,12 +594,45 @@ function start-script{
     $UserRolesGrid.Visible = $false
     $UserRolesGrid.Dock = 'Top'
     $form.Controls.Add($UserRolesGrid)
-    
+   
     $UserPropertiesGrid = New-Object System.Windows.Forms.GroupBox
     $UserPropertiesGrid.Size=New-Object System.Drawing.Size($UserGrid.Size)
     $UserPropertiesGrid.Visible = $false
     $UserPropertiesGrid.Dock = 'Top'
+
     $form.Controls.Add($UserPropertiesGrid)
+
+    $CopyButton = New-Object System.Windows.Forms.Label
+    #$CopyButton.Font = New-Object System.Drawing.Font("Calibri Light",8,[System.Drawing.FontStyle]::Regular)
+    $CopyButton.Location = New-Object System.Drawing.Size($((($UserGrid.Width-264)*3/4)-30),$($UserPropertiesGrid.Top +4))
+    $CopyButton.Size = New-Object System.Drawing.Size(20,20)
+    #$CopyButton.Text = "Copy"
+    $CopyButton.Image = $copyImage
+    #$CopyButton.FlatStyle = "Flat"
+    $CopyButton.Visible = $false
+    $CopyButton.Cursor = "Hand"
+    $CopyButton.Add_Click({
+        (Write-Output $UserProperties.SelectedRows[0].Cells['Value'].Value) | Set-Clipboard
+        $CopyButton.Visible = $false
+    })
+    $UserPropertiesGrid.Controls.Add($CopyButton)
+    $CopyButton.BringToFront()
+    
+    $PasteButton = New-Object System.Windows.Forms.Label
+    #$PasteButton.Font = New-Object System.Drawing.Font("Calibri Light",8,[System.Drawing.FontStyle]::Regular)
+    $PasteButton.Location = New-Object System.Drawing.Size($($CopyButton.Right+4),$($UserPropertiesGrid.Top +4))
+    $PasteButton.Size = New-Object System.Drawing.Size(20,20)
+    #$PasteButton.Text = "Paste"
+    $PasteButton.Image = $pasteImage
+    #$PasteButton.FlatStyle = "Flat"
+    $PasteButton.Cursor = "Hand"
+    $PasteButton.Visible = $false
+    $PasteButton.Add_Click({
+        $UserProperties.SelectedRows[0].Cells['Value'].Value = Get-Clipboard
+        $PasteButton.Visible = $false
+    })
+    $UserPropertiesGrid.Controls.Add($PasteButton)
+    $PasteButton.BringToFront()
 
     $GroupGrid = New-Object System.Windows.Forms.GroupBox
     $GroupGrid.Size=New-Object System.Drawing.Size($UserGrid.Size)
@@ -653,7 +696,7 @@ function start-script{
     
     $UsernameTextbox = New-Object System.Windows.Forms.TextBox
     $UsernameTextbox.Location = New-Object System.Drawing.Size($UsernameLabel.Right,2)
-    $UsernameTextbox.Size = New-Object System.Drawing.Size(233,25)
+    $UsernameTextbox.Size = New-Object System.Drawing.Size($($UserGrid.Width/2-20-$UserNameLabel.Right),25)
     $UsernameTextbox.Text = ""
     $UsernameTextbox.Cursor = "Arrow"
     $UsernameTextbox.Font = New-Object System.Drawing.Font("Calibri",11,[System.Drawing.FontStyle]::Bold)
@@ -764,7 +807,6 @@ function start-script{
     $dgv.AllowUserToResizeColumns = $dgv.AllowUserToResizeRows = $dgv.AllowUserToResizeColumns = $dgv.AllowUserToAddRows = $dgv.MultiSelect = $dgv.RowHeadersVisible = $false;
     $dgv.ColumnHeadersHeightSizeMode = 1
     $dgv.EnableHeadersVisualStyles = 0
-
     $dgv.Width = $($UserGrid.Width)
     $dgv.ReadOnly = $true
     $dgv.ColumnHeadersDefaultCellStyle.Font = New-Object System.Drawing.Font("Calibri",11,[System.Drawing.FontStyle]::Bold)
@@ -812,11 +854,17 @@ function start-script{
     $UserGrid.Controls.Add($DisplayButton)
     $DisplayButton.BringToFront()
 
-    $SaveFilterSetting = New-Object System.Windows.Forms.Button
-    $SaveFilterSetting.Location = New-Object System.Drawing.Size($($UserPropertiesGrid.Right-100), $($dgv.Top+1.2))
-    $SaveFilterSetting.Size = New-Object System.Drawing.Size(60, 20)
-    $SaveFilterSetting.Text = "Save"
-    $SaveFilterSetting.Enabled = $false
+    $SaveFilterSetting = New-Object System.Windows.Forms.Label
+    $SaveFilterSetting.Location = New-Object System.Drawing.Size($($UserPropertiesGrid.Right - 130), 4)
+    $SaveFilterSetting.Size = New-Object System.Drawing.Size(20, 20)
+    $SaveFilterSetting.Image = $saveImage
+    if (!(Test-Path variable:$saveImage)){
+        $SaveFilterSetting.Image = $saveImage
+    } else {
+        $SaveFilterSetting.Text = "S"
+    }
+    $SaveFilterSetting.Visible = $false
+    $SaveFilterSetting.Cursor = "Hand"
     $SaveFilterSetting.Add_Click({
         $list = @()
         if (Test-Path -Path ".\config.ini") {
@@ -827,15 +875,20 @@ function start-script{
             $list += [int]$i.Cells[0].Value
         }
         Set-Content -Path ".\config.ini" -Value ($list | Out-String)
-        $SaveFilterSetting.Enabled = $CheckBoxButton.Enabled = $false
+        $SaveFilterSetting.Visible = $CheckBoxButton.Visible = $false
     })
     $UserPropertiesGrid.Controls.Add($SaveFilterSetting)
     
-    $CheckBoxButton = New-Object System.Windows.Forms.Button
-    $CheckBoxButton.Location = New-Object System.Drawing.Size($($SaveFilterSetting.Left-60), $SaveFilterSetting.Top)
-    $CheckBoxButton.Size = New-Object System.Drawing.Size(60, 20)
-    $CheckBoxButton.Text = "Filter"
-    $CheckBoxButton.Enabled = $false
+    $CheckBoxButton = New-Object System.Windows.Forms.Label
+    $CheckBoxButton.Location = New-Object System.Drawing.Size($($SaveFilterSetting.Left-24), 3)
+    $CheckBoxButton.Size = New-Object System.Drawing.Size(20, 20)
+    if (!(Test-Path variable:$filterImage)){
+        $CheckBoxButton.Image = $filterImage
+    } else {
+        $CheckBoxButton.Text = "F"
+    }
+    $CheckBoxButton.Visible = $false
+    $CheckBoxButton.Cursor = "Hand"
     $CheckBoxButton.Add_Click({
         foreach($i in $CheckBoxGrid.Rows){
             foreach($j in $UserProperties.Rows) {
@@ -845,7 +898,7 @@ function start-script{
                 }
             }
         }
-        $CheckBoxButton.Enabled = $false
+        $CheckBoxButton.Visible = $false
     })
     $UserPropertiesGrid.Controls.Add($CheckBoxButton)
 
@@ -871,11 +924,16 @@ function start-script{
     $UserProperties.Columns[0..1] | Foreach-Object{
         $_.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::Fill
     }
+    $UserProperties.Add_RowStateChanged({
+        $CopyButton.Visible = $UserProperties.SelectedRows.Count -gt 0 -and $UserProperties.SelectedRows[0].Cells['Value'].Value.Length -gt 0
+        $PasteButton.Visible = $UserProperties.SelectedRows.Count -gt 0 -and (Get-Clipboard).Length -gt 0
+    })
+
     $CheckBoxGrid = New-Object System.Windows.Forms.DataGridView
     $CheckBoxGrid.DefaultCellStyle.SelectionBackColor = "Yellow"
     $CheckBoxGrid.DefaultCellStyle.SelectionForeColor = "Blue"
-    $CheckBoxGrid.Location = New-Object System.Drawing.Size($($UserPropertiesGrid.Right-258), $($dgv.Top))
-    $CheckBoxGrid.Size = New-Object System.Drawing.Size(258,$UserProperties.Height)
+    $CheckBoxGrid.Location = New-Object System.Drawing.Size($($UserProperties.Right), $($dgv.Top))
+    $CheckBoxGrid.Size = New-Object System.Drawing.Size(264,$UserProperties.Height)
     $CheckBoxColumn = New-Object System.Windows.Forms.DataGridViewCheckBoxColumn
     $CheckBoxColumn.width = 30
     $CheckBoxGrid.Columns.Add($CheckBoxColumn) | Out-Null
@@ -900,7 +958,7 @@ function start-script{
             if ($i.Cells[0].Value -eq 1) {$k++}
         }
         if ($k -eq $CheckBoxGrid.RowCount) {$SelectItemCheckBox.CheckState = "Checked"} elseif ($k -eq 0) {$SelectItemCheckBox.CheckState = "Unchecked"} else {$SelectItemCheckBox.CheckState = "Indeterminate"}
-        $SaveFilterSetting.Enabled = $CheckBoxButton.Enabled = $true
+        $SaveFilterSetting.Visible = $CheckBoxButton.Visible = $true
     })
     $UserPropertiesGrid.Controls.Add($CheckBoxGrid)
     $CheckBoxGrid.Columns[0].SortMode = "Programmatic"
@@ -941,7 +999,7 @@ function start-script{
         foreach($i in $CheckBoxGrid.Rows){
             $i.Cells[0].Value = $SelectItemCheckBox.Checked
         }
-        $CheckBoxButton.Enabled = $true
+        $CheckBoxButton.Visible = $SaveFilterSetting.Visible = $true
     })
     $CheckBoxGrid.Columns[0].HeaderCell.Style.BackColor = "Transparent"
 
@@ -1593,6 +1651,8 @@ function start-script{
     $AdminTextBox.Add_TextChanged({
         $AdminUpdateSave.Visible = $AdminTextBox.Text.Length -gt 0
         $AdminUpdateClear.Visible = $AdminTextBox.Text.Length -gt 0
+        $ToolTip.SetToolTip($LeftRadioButton, "Prefix: '$($AdminTextBox.Text)Username'")
+        $ToolTip.SetToolTip($RightRadioButton, "Suffix: 'Username$($AdminTextBox.Text)'")
     })
     $AdminTextBox.Add_KeyDown({
         if ($_.KeyCode -eq "Enter" -and $AdminTextBox.Text.Length -gt 0){
@@ -1619,7 +1679,7 @@ function start-script{
     })
 
     $CenterRadioButton = New-Object System.Windows.Forms.RadioButton
-    $CenterRadioButton.Location = New-Object System.Drawing.Size($($AdminTextBox.Width/2-$LeftRadioButton.Width/2), $($AdminTextBox.Bottom))
+    $CenterRadioButton.Location = New-Object System.Drawing.Size($(($AdminTextBox.Width/2)-30), $($AdminTextBox.Bottom))
     $CenterRadioButton.Size = New-Object System.Drawing.Size($($AdminTextBox.Width/3),30)
     $CenterRadioButton.Text = "Around"
     if ($adm.Length -gt 3) {
@@ -1660,8 +1720,8 @@ function start-script{
     $TopPanel.Controls.Add($BlockLabel)
 
     $SaveButton = New-Object System.Windows.Forms.Button
-    $SaveButton.Location = New-Object System.Drawing.Size($($dgv.Right - ($UsernameTextbox.Width+35)),$UsernameTextbox.Location.Y)
-    $SaveButton.Size = New-Object System.Drawing.Size($($SearchUserTextBox.Width+35),$SearchUserTextBox.Height)
+    $SaveButton.Location = New-Object System.Drawing.Size($($dgv.Right - (268)),$UsernameTextbox.Location.Y)
+    $SaveButton.Size = New-Object System.Drawing.Size(268,$SearchUserTextBox.Height)
     $SaveButton.Font = New-Object System.Drawing.Font("Calibri",11,[System.Drawing.FontStyle]::Bold)
     $SaveButton.Visible = $false
     $SaveButton.FlatStyle = "Flat"
@@ -1868,8 +1928,13 @@ function start-script{
     $InfoButton.Cursor = "Hand"
     $InfoButton.Visible = $false
     $InfoButton.Add_Click({
-        $RoleButton.BackColor = "Lightblue"
-        $RoleButton.Text = "Roles"
+        $RoleButton.ForeColor = "Black"
+        $RoleButton.Text = ""
+        if (!(Test-Path variable:$userrolesImage)){
+            $RoleButton.Image = $userrolesImage
+        } else {
+            $RoleButton.Text = "R"
+        }
         if($InfoButton.Text -ne "⤴") {
             $InfoButton.Image = $null
             $InfoButton.Text = "⤴";
@@ -1885,21 +1950,29 @@ function start-script{
             } else {
                 $InfoButton.Text = " i"
             }
+
             $ToolTip.SetToolTip($InfoButton, "Show user info")
             $UserPropertiesGrid.Visible = $false;
-            if ($RoleButton.Text -eq "Roles") {$UserRolesGrid.Visible = $false; $UserGrid.Visible = $true} else {$UserGrid.Visible = $false; $UserRolesGrid.Visible = $true}
+            if ($RoleButton.Text -ne "⤴") {$UserRolesGrid.Visible = $false; $UserGrid.Visible = $true} else {$UserGrid.Visible = $false; $UserRolesGrid.Visible = $true}
             $SearchUserTextBox.Focus()
         }
     })
     $UsernameTextbox.Controls.Add($InfoButton)
-
-    $RoleButton = New-Object System.Windows.Forms.Button
-    $RoleButton.Location = New-Object System.Drawing.Size($($UsernameTextbox.Right+2),$UsernameTextbox.Location.Y)
-    $RoleButton.Size = New-Object System.Drawing.Size(65,$SearchRoleTextBox.Height)
-    $RoleButton.Text = "Roles"
+    
+    $RoleButton = New-Object System.Windows.Forms.Label
+    #$RoleButton.Location = New-Object System.Drawing.Size($($UsernameTextbox.Right+2),$UsernameTextbox.Location.Y)
+    $RoleButton.Location = New-Object System.Drawing.Size(1,-1)
+    $RoleButton.Size = New-Object System.Drawing.Size(22,$SearchRoleTextBox.Height)
+    $RoleButton.Font = New-Object System.Drawing.Font("Calibri Light",13,[System.Drawing.FontStyle]::Bold)
     $RoleButton.FlatStyle = "Flat"
     $RoleButton.Visible = $false
-    $RoleButton.BackColor = "Lightblue"
+    $RoleButton.Cursor = "Hand"
+    if (!(Test-Path variable:$userrolesImage)){
+        $RoleButton.Image = $userrolesImage
+    } else {
+        $RoleButton.Text = "R"
+    }
+    $RoleButton.BackColor = "Transparent"
     $RoleButton.Add_Click({
         $InfoButton.Text = ""
         if (!(Test-Path variable:$UserinfoImage)){
@@ -1907,28 +1980,34 @@ function start-script{
         } else {
             $InfoButton.Text = " i"
         }
-        if($RoleButton.Text -eq "Roles") {
-            $RoleButton.BackColor = "Yellow";
-            $RoleButton.Text = "Users";
+        if($RoleButton.Text -ne "⤴") {
+            $RoleButton.ForeColor = "Blue";
+            $RoleButton.Text = "⤴";
+            $RoleButton.Image = $null
             memberof
             $SearchRoleTextBox.Focus()
-            $ToolTip.SetToolTip($RoleButton, "Show users")
+            $ToolTip.SetToolTip($RoleButton, "Return")
         } else {
-            $RoleButton.BackColor = "Lightblue"
-            $RoleButton.Text = "Roles"
+            $RoleButton.ForeColor = "Black"
+            $RoleButton.Text = ""
+            if (!(Test-Path variable:$userrolesImage)){
+                $RoleButton.Image = $userrolesImage
+            } else {
+                $RoleButton.Text = "R"
+            }
             $UserRolesGrid.Visible = $false;
             $UserGrid.Visible = $true
             $ToolTip.SetToolTip($RoleButton, "Show user roles")
             $SearchUserTextBox.Focus()
         }
     })
-    $BottomPanel.Controls.Add($RoleButton)
+    $UsernameTextbox.Controls.Add($RoleButton)
 
     $AdminUpdate = New-Object System.Windows.Forms.Label
     $AdminUpdate.Size = New-Object System.Drawing.Size(20, $UsernameTextbox.Height)
     if (!(Test-Path variable:$GearImage)){
         $AdminUpdate.Image = $GearhImage
-        $AdminUpdate.Location = New-Object System.Drawing.Size($($UserTypeCheckBox.Width - 22), 0)
+        $AdminUpdate.Location = New-Object System.Drawing.Size($($UserTypeCheckBox.Width - 23), 0)
     } else {
         $AdminUpdate.Text = "⚙"
         $AdminUpdate.Location = New-Object System.Drawing.Size($($UserTypeCheckBox.Width - 22), 5)
@@ -1948,10 +2027,10 @@ function start-script{
     $UserTypeCheckBox.Controls.Add($AdminUpdate)
 
     $AdminUpdateReturn = New-Object System.Windows.Forms.Label
-    $AdminUpdateReturn.Location = New-Object System.Drawing.Size($($AdminTextBox.Width - 22), $UserTypeCheckBox.Location.Y)
+    $AdminUpdateReturn.Location = New-Object System.Drawing.Size($($AdminTextBox.Width - 22), 1)
     $AdminUpdateReturn.Size = New-Object System.Drawing.Size(20, $UsernameTextbox.Height)
     $AdminUpdateReturn.Text = "⤴"
-    $AdminUpdateReturn.Font = New-Object System.Drawing.Font("Calibri",11,[System.Drawing.FontStyle]::Bold)
+    $AdminUpdateReturn.Font = New-Object System.Drawing.Font("Calibri",13,[System.Drawing.FontStyle]::Bold)
     $AdminUpdateReturn.Cursor = "Hand"
     $AdminUpdateReturn.FlatStyle = "Flat"
     $AdminUpdateReturn.BackColor = "Transparent"
@@ -1998,11 +2077,15 @@ function start-script{
     $ToolTip = New-Object System.Windows.Forms.ToolTip
     $ToolTip.SetToolTip($SearchUserTextBox, "Search user(s) (press enter to search actively)")
     $ToolTip.SetToolTip($AdminUpdate, "Set admin prefix/suffix")
+    $ToolTip.SetToolTip($AdminUpdateReturn, "Return")
+    $ToolTip.SetToolTip($AdminUpdateClear, "Clear admin prefix/suffix input")
+    $ToolTip.SetToolTip($AdminUpdateSave, "Save admin prefix/suffix")
     $ToolTip.SetToolTip($DisplayButton, "Show (display)name")
     $ToolTip.SetToolTip($InfoButton, "Show user info")
     $ToolTip.SetToolTip($RestoreRadioButton, "Select restore password option")
     $ToolTip.SetToolTip($ResetRadioButton, "Select reset password option")
     $ToolTip.SetToolTip($ClearSearch, "Clear search field")
+    $ToolTip.SetToolTip($SearchEnterButton, "Search user(s)")
     $ToolTip.SetToolTip($SaveButton, "Submit")
     $ToolTip.SetToolTip($OldPasswordTextBox, "Enter old password")
     $ToolTip.SetToolTip($NewPasswordTextBox, "Enter new password")
@@ -2012,9 +2095,10 @@ function start-script{
     $ToolTip.SetToolTip($RemoveRole, "Remove role(s)")
     $ToolTip.SetToolTip($CheckBoxButton, "Filter user properties")
     $ToolTip.SetToolTip($SaveFilterSetting, "Save current filter")
-    $ToolTip.SetToolTip($LeftRadioButton, "Prefix: $($AdminTextBox.Text)Username")
-    $ToolTip.SetToolTip($RightRadioButton, "Suffix: Username$($AdminTextBox.Text)")
-    #$ToolTip.SetToolTip($TopMostChckbx, "Show GUI on top")
+    $ToolTip.SetToolTip($LeftRadioButton, "Prefix: '$($AdminTextBox.Text)Username'")
+    $ToolTip.SetToolTip($RightRadioButton, "Suffix: 'Username$($AdminTextBox.Text)'")
+    $ToolTip.SetToolTip($CopyButton, "Copy value")
+    $ToolTip.SetToolTip($PasteButton, "Paste value")
     $ToolTip.SetToolTip($RoleButton, "Show user roles")
     $ToolTip.SetToolTip($ShowCategory, "Show/hide category")
     $ToolTip.SetToolTip($UserTypeCheckBox, "Filter on admins")
@@ -2029,7 +2113,6 @@ function start-script{
             $_.Graphics.DrawString($_.ToolTipText, $fontstyle, $WhiteBrush, ($_.Bounds.X + ($_.Bounds.Width/2)), ($_.Bounds.Y + ($_.Bounds.Height/2)), $format)         
     }
     $ToolTip.Add_Draw($ToolTip_Draw)
-
     $Add_FormClosed={
         try{$ToolTip.Remove_Draw($ToolTip_Draw)} catch { Out-Null }
     }
@@ -2043,4 +2126,3 @@ start-script
 #$objComputer = Get-ADComputer lt53639
 #$Bitlocker_Object = Get-ADObject -Filter {objectclass -eq 'msFVE-RecoveryInformation'} -SearchBase $objComputer.DistinguishedName -Properties 'msFVE-RecoveryPassword'
 #$Bitlocker_Object
-
