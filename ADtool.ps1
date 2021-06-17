@@ -125,7 +125,10 @@ function save {
             #unlock user
             $job = Start-Job -Name UnlockUser -ScriptBlock {param($arg0); Unlock-ADAccount -Identity $arg0} -ArgumentList $UsernameTextbox.Text | Wait-Job
             $status = try{Receive-Job -Job $job -ErrorAction Stop} catch {"$_"}
-            if ($status -eq $null) {$results.Add($results.Count + 1, "Account unlocked: done")} else {$results.Add($results.Count + 1, "Account unlocked: failed"); $errors.Add($errors.Count + 1, $status)}
+            if (!$SaveButton.Text.ToLower().Contains('unlock')) {
+                $addition = " (in addition)"
+            }
+            if ($status -eq $null) {$results.Add($results.Count + 1, "Account unlocked$($addition): done")} else {$results.Add($results.Count + 1, "Account unlocked$($addition): failed"); $errors.Add($errors.Count + 1, $status)}
         }
 
         #get user status
@@ -214,11 +217,11 @@ function check {
         foreach($i in $vars) {
             $i.Visible = $false
         }
-        
         $SaveButton.Text = ""
         $RestoreRadioButton.Visible = $ResetRadioButton.Visible = $RoleButton.Visible = $InfoButton.Visible = $UserRolesGrid.Visible = $UserPropertiesGrid.Visible = $EnableCheckBox.Visible = $false
         if (!(Test-Path variable:$userrolesImage)){
             $RoleButton.Image = $userrolesImage
+            $RoleButton.Text = ""
         } else {
             $RoleButton.Text = "R"
         }
@@ -389,6 +392,7 @@ function refresh {
     if ($UserGrid_QueryLabel.Text -like "Fetching*" -or $UserGrid_QueryLabel.Text -eq "Preparing fetch"){
         if ($dgv.RowCount -eq 1) {$UserGrid_QueryLabel.Text = "Fetched $($dgv.RowCount) row in $($time) - Query: `"$($SearchVal)`""} elseif ($BlockLabel.Text -ne "x") {$UserGrid_QueryLabel.Text = "Fetched $($dgv.RowCount) rows in $($time) - Query: `"$($SearchVal)`""} else {$UserGrid_QueryLabel.Text = "Enter a value and/or press enter to search user. Duration time depends on search value"; check}
     }
+    $BlockLabel.Text = ""
 }
 
 function refresh_group {
@@ -430,6 +434,7 @@ function refresh_group {
     if ($GroupGrid_QueryLabel.Text -like "Fetching*" -or $GroupGrid_QueryLabel.Text -eq "Preparing fetch"){
         if ($AllGroups.RowCount -eq 1) {$GroupGrid_QueryLabel.Text = "Fetched $($AllGroups.RowCount) row in $($time) - Query: `"$($SearchVal)`""} elseif ($BlockLabel.Text -ne "x") {$GroupGrid_QueryLabel.Text = "Fetched $($AllGroups.RowCount) rows in $($time) - Query: `"$($SearchVal)`""} else {$GroupGrid_QueryLabel.Text = "Enter a value and/or press enter to search user. Duration time depends on search value"}
     }
+    $BlockLabel.Text = ""
 }
 function fetch_info {
     $UserProperties.Rows.Clear()
@@ -536,6 +541,7 @@ function memberof {
             $CurrentRoles.Rows[0].Selected = $true
         }
     }
+    $BlockLabel.Text = ""
 }
 
 function set-admin-prefix {
@@ -683,6 +689,7 @@ function start-script{
             $BackupRoles.Rows.Clear()
             check
         }
+        if ($UserRolesGrid.Visible -and $UsernameTextbox.Text.Length -gt 0) {memberof}
     })
     $BottomPanel.Controls.Add($UsernameTextbox)
 
@@ -1386,11 +1393,29 @@ function start-script{
                 $dgv.Refresh()
                 $dgv.CurrentCell = $i.Cells['UserName']
                 $i.Selected = $true
+                $BlockLabel.Text = ""
                 $UsernameTextbox.Text = $i.Cells['Username'].Value
                 $s = "v"
                 break
             }
-        } if ($s -ne "v") {if ($dgv.RowCount -ne 0) {$dgv.ClearSelection(); $UsernameTextbox.Text = ""}}
+        }
+        if ($s -ne "v") {
+            if ($dgv.RowCount -ne 0) {
+                $dgv.ClearSelection()
+                $UsernameTextbox.Text = $InfoButton.Text = $RoleButton.Text = ""
+                if (!(Test-Path variable:$UserinfoImage)){
+                    $InfoButton.Image = $UserinfoImage
+                } else {
+                    $InfoButton.Text = " i"
+                }
+                if (!(Test-Path variable:$userrolesImage)){
+                        $RoleButton.Image = $userrolesImage
+                } else {
+                        $RoleButton.Text = "R"
+                }
+                $InfoButton.Visible = $RoleButton.Visible = $UserRolesGrid.Visible = $false; $UserGrid.Visible = $true
+            }
+        }
         $BlockLabel.Text = ""
     })
     $SearchUserTextBox.Add_KeyDown({
@@ -1405,8 +1430,8 @@ function start-script{
             refresh
             $SearchUserTextBox.SelectionStart = 0
             $SearchUserTextBox.SelectionLength = $SearchUserTextBox.Text.Length
-            $BlockLabel.Text = ""
         }
+        $BlockLabel.Text = ""
     })
     $TopPanel.Controls.Add($SearchUserTextBox)
 
@@ -1517,7 +1542,7 @@ function start-script{
             }
         }
         $BlockLabel.Text = "y"
-        refresh $SearchUserTextBox.Text
+        refresh
         $SearchUserTextBox.Focus()
         $BlockLabel.Text = ""
     })
@@ -1947,6 +1972,7 @@ function start-script{
             $ToolTip.SetToolTip($RoleButton, "Show user roles")
             $SearchUserTextBox.Focus()
         }
+        $BlockLabel.Text = ""
     })
     $UsernameTextbox.Controls.Add($RoleButton)
 
