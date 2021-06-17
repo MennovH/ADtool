@@ -1,11 +1,12 @@
-﻿Import-Module ActiveDirectory
+﻿#Created by: MennovH, 2021
+
 [void] [System.Reflection.Assembly]::LoadWithPartialName("System.Drawing") 
 [void] [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms")
 [void] [System.Reflection.Assembly]::LoadWithPartialName("Microsoft.VisualBasic")
 
 $get_comp = Get-ADComputer $env:COMPUTERNAME -Properties OperatingSystem
 if ($get_comp.OperatingSystem -like "*Windows Server 2008 R2*" -or $get_comp.OperatingSystem -like "*Windows 7*") {
-    $MessageBody = "Due to the Operating system, some actions (e.g. unlocking AD users) may not work. The error message could look like:`n`n'Failed to unlock user account. Insufficient access rights to perform the operation.'`n`nIn order to fix this, one must update the operating system, or install a hotfix from Microsoft. Otherwise, it's necessary to perform these actions via Active Directory..."
+    $MessageBody = "Due to the current version of the Operating system, some actions (e.g. unlocking AD users) may not work. The error message could look like:`n`n'Failed to unlock user account. Insufficient access rights to perform the operation.'`n`nIn order to fix this, one must upgrade the operating system, or install a hotfix from Microsoft. Otherwise, it's necessary to perform these actions via Active Directory..."
     $MessageTitle = "Information"
     [Microsoft.VisualBasic.Interaction]::MsgBox($MessageBody,'OkOnly,SystemModal,Critical',$MessageTitle) | Out-Null
 }
@@ -309,7 +310,7 @@ function refresh {
     if (!(Test-Path variable:$UserinfoImage)){
         $InfoButton.Image = $UserinfoImage
     } else {
-        $InfoButton.Text = " i"
+        $InfoButton.Text = " I"
     }
     $UserGrid_QueryLabel.Text = "Preparing fetch"
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -398,7 +399,7 @@ function refresh {
 function refresh_group {
     $BlockLabel.Text = "x"
     if ($SearchUserTextBox.Text.Replace("*","").Length -eq 0) {$SearchVal = "*"} else {$SearchVal = "*$($SearchUserTextBox.Text)*"}    
-    if (!(Test-Path variable:$GroupinfoImage)){$InfoGroupButton.Image = $GroupinfoImage} else {$InfoGroupButton.Text = " i"}
+    if (!(Test-Path variable:$GroupinfoImage)){$InfoGroupButton.Image = $GroupinfoImage} else {$InfoGroupButton.Text = " I"}
     $GroupGrid_QueryLabel.Text = "Preparing fetch"
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $stopwatch.Start()
@@ -594,6 +595,11 @@ function start-script{
     $CopyButton = New-Object System.Windows.Forms.Label
     $CopyButton.Location = New-Object System.Drawing.Size($((($UserGrid.Width-264)*3/4)-30),$($UserPropertiesGrid.Top +4))
     $CopyButton.Size = New-Object System.Drawing.Size(20,20)
+    if (!(Test-Path variable:$copyImage)){
+        $CopyButton.Image = $copyImage
+    } else {
+        $CopyButton.Text = "C"
+    }
     $CopyButton.Image = $copyImage
     $CopyButton.Visible = $false
     $CopyButton.Cursor = "Hand"
@@ -610,6 +616,11 @@ function start-script{
     $PasteButton.Image = $pasteImage
     $PasteButton.Cursor = "Hand"
     $PasteButton.Visible = $false
+    if (!(Test-Path variable:$pasteImage)){
+        $PasteButton.Image = $pasteImage
+    } else {
+        $PasteButton.Text = "P"
+    }
     $PasteButton.Add_Click({
         $UserProperties.SelectedRows[0].Cells['Value'].Value = Get-Clipboard
         $PasteButton.Visible = $false
@@ -637,9 +648,9 @@ function start-script{
     $UsernameLabel.Location = New-Object System.Drawing.Size(0, 2)
     $UsernameLabel.Size = New-Object System.Drawing.Size(55,25)
     $UsernameLabel.Font = New-Object System.Drawing.Font("Calibri",10.5,[System.Drawing.FontStyle]::Regular)
+    $UsernameLabel.ForeColor = "Blue"
     $UsernameLabel.Text = "User"
     $UsernameLabel.FlatStyle = "Flat"
-    $UsernameLabel.ForeColor = "Blue"
     $UsernameLabel.BackColor = "Transparent"
     $UsernameLabel.Add_Click({
         $list = @($UserGrid, $UserRolesGrid, $UserPropertiesGrid, $GroupGrid)
@@ -719,9 +730,8 @@ function start-script{
     if (!(Test-Path variable:$GroupInfoImage)){
         $InfoGroupButton.Image = $GroupinfoImage
     } else {
-        $InfoGroupButton.Text = " i"
+        $InfoGroupButton.Text = " I"
     }
-
     $InfoGroupButton.ForeColor = "Blue"
     $InfoGroupButton.FlatStyle = "Flat"
     $InfoGroupButton.Cursor = "Hand"
@@ -755,7 +765,7 @@ function start-script{
             if (!(Test-Path variable:$GroupInfoImage)){
                 $InfoGroupButton.Image = $GroupinfoImage
             } else {
-                $InfoGroupButton.Text = " i"
+                $InfoGroupButton.Text = " I"
             }
             $ToolTip.SetToolTip($InfoGroupButton, "Show group info")
             $AllMembers.Visible = $NewMembers.Visible = $false
@@ -886,6 +896,7 @@ function start-script{
     $UserProperties.ColumnCount = 2
     $UserProperties.Columns[0].Name = "Parent"
     $UserProperties.Columns[1].Name = "Value"
+    $UserProperties.Columns['Parent'].ReadOnly = $true
     $UserProperties.AllowUserToResizeRows = $UserProperties.AllowUserToResizeColumns = $UserProperties.AllowUserToAddRows = $false
     $UserProperties.ColumnHeadersHeightSizeMode = 1
     $UserProperties.EnableHeadersVisualStyles = 0
@@ -1406,14 +1417,14 @@ function start-script{
                 if (!(Test-Path variable:$UserinfoImage)){
                     $InfoButton.Image = $UserinfoImage
                 } else {
-                    $InfoButton.Text = " i"
+                    $InfoButton.Text = " I"
                 }
                 if (!(Test-Path variable:$userrolesImage)){
                         $RoleButton.Image = $userrolesImage
                 } else {
                         $RoleButton.Text = "R"
                 }
-                $InfoButton.Visible = $RoleButton.Visible = $UserRolesGrid.Visible = $false; $UserGrid.Visible = $true
+                $UserPropertiesGrid.Visible = $InfoButton.Visible = $RoleButton.Visible = $UserRolesGrid.Visible = $false; $UserGrid.Visible = $true
             }
         }
         $BlockLabel.Text = ""
@@ -1894,7 +1905,7 @@ function start-script{
     if (!(Test-Path variable:$UserinfoImage)){
         $InfoButton.Image = $UserinfoImage
     } else {
-        $InfoButton.Text = " i"
+        $InfoButton.Text = " I"
     }
     $InfoButton.ForeColor = "Blue"
     $InfoButton.FlatStyle = "Flat"
@@ -1921,7 +1932,7 @@ function start-script{
             if (!(Test-Path variable:$UserinfoImage)){
                 $InfoButton.Image = $UserinfoImage
             } else {
-                $InfoButton.Text = " i"
+                $InfoButton.Text = " I"
             }
 
             $ToolTip.SetToolTip($InfoButton, "Show user info")
@@ -1938,6 +1949,7 @@ function start-script{
     $RoleButton.Font = New-Object System.Drawing.Font("Calibri Light",13,[System.Drawing.FontStyle]::Bold)
     $RoleButton.FlatStyle = "Flat"
     $RoleButton.Visible = $false
+    $RoleButton.ForeColor = "Blue"
     $RoleButton.Cursor = "Hand"
     if (!(Test-Path variable:$userrolesImage)){
         $RoleButton.Image = $userrolesImage
@@ -1950,7 +1962,7 @@ function start-script{
         if (!(Test-Path variable:$UserinfoImage)){
             $InfoButton.Image = $UserinfoImage
         } else {
-            $InfoButton.Text = " i"
+            $InfoButton.Text = " I"
         }
         if($RoleButton.Text -ne "⤴") {
             memberof
