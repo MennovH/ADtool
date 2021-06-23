@@ -32,6 +32,7 @@ if (Test-Path .\images) {
 function save {
     $results = New-Object System.Collections.Generic.Dictionary"[Int,String]"
     $errors = New-Object System.Collections.Generic.Dictionary"[Int,String]"
+    $table = @()
     if ($SaveButton.Text.ToLower().Contains('update')) {
         $removelist = $addlist = @()
         foreach($i in $CurrentRoles.Rows) {
@@ -65,25 +66,27 @@ function save {
             if ($Result -eq "Yes") {
                 $arrayJobs = @()
                 foreach($group in $addlist){
-                    $arrayJobs += (Start-Job -Name "Add to $($group)" -ScriptBlock {param($group, $member); Add-ADGroupMember -Identity $group -Members $member} -ArgumentList $group, $UsernameTextbox.Text)
+                    $arrayJobs += (Start-Job -Name "+$($group)" -ScriptBlock {param($group, $member); Add-ADGroupMember -Identity $group -Members $member} -ArgumentList $group, $UsernameTextbox.Text)
                 }
                 foreach($group in $removelist){
-                    $arrayJobs += (Start-Job -Name "Remove from $($group)" -ScriptBlock {param($group, $member); Remove-ADGroupMember -Identity $group -Members $member -Confirm:$false} -ArgumentList $group, $UsernameTextbox.Text)
+                    $arrayJobs += (Start-Job -Name "-$($group)" -ScriptBlock {param($group, $member); Remove-ADGroupMember -Identity $group -Members $member -Confirm:$false} -ArgumentList $group, $UsernameTextbox.Text)
                 }
-
                 $complete = $false
                 while (-not $complete) {
                     $arrayJobsInProgress = $arrayJobs | Where-Object { $_.State -match ‘running’ }
                     if (-not $arrayJobsInProgress) {$complete = $true}
                 }
-
                 foreach($j in $arrayJobs) {
                     try{
                         Receive-Job -Job $j -ErrorAction Stop;
-                        $results.Add($results.Count + 1,"'$($j.Name)': done")
+                        $name = $j.Name.Substring(1)
+                        $results.Add($results.Count + 1,"$($j.Name.Substring(0,1).Replace("+", "Added to").Replace("-", "Removed from ")) '$($name)'")
+                        $table += [Pscustomobject]@{Result = "Success";Task = "$($j.Name.Substring(0,1).Replace("+", "Add to").Replace("-", "Remove from ")) '$($name)'";Error = ""}
+
                     } catch {
-                        $results.Add($results.Count + 1,"'$($j.Name)': failed");
-                        $errors.Add($errors.Count + 1, "$_")
+                        $results.Add($results.Count + 1,"$($j.Name.Substring(0,1).Replace("+", "Failed to add to").Replace("-", "Failed to remove from ")) '$($name)'")
+                        $errors.Add($errors.Count + 1, "$($n):`n$($_)")
+                        $table += [Pscustomobject]@{Result = "Fail";Task = "$($j.Name.Substring(0,1).Replace("+", "Add to").Replace("-", "Remove from ")) '$($name)'";Error = "$_"}
                     }
                 }
             }
@@ -108,19 +111,37 @@ function save {
                 $job = (Start-Job -Name ResetPassword -ScriptBlock {param($arg0,$arg1); Set-ADAccountPassword -Identity $arg0 -Reset -NewPassword (ConvertTo-SecureString -AsPlainText $arg1 -Force)} -ArgumentList $UsernameTextbox.Text, $NewPasswordTextBox.Text) | Wait-Job 
             }
             $status = try{Receive-Job -Job $job -ErrorAction Stop} catch {"$_"}
-            if ($status -eq $null) {$results.Add($results.Count + 1, "Password $($type): done")} else {$results.Add($results.Count + 1, "Password $($type): failed"); $errors.Add($errors.Count + 1, $status)}
+            if ($status -eq $null) {
+                $results.Add($results.Count + 1, "Password $($type)$(if ($type -eq "restore"){"d"})")
+                $table += [Pscustomobject]@{Result = "Success";Task = "Password $($type)";Error = ""}
+            } else {
+                $results.Add($results.Count + 1, "Failed to $($type) password"); $errors.Add($errors.Count + 1, "Password $($type):`n$($status)`n")
+                $table += [Pscustomobject]@{Result = "Fail";Task = "Password $($type)";Error = "$status"}
+            }
         }
         if ($SaveButton.Text.ToLower().Contains('enable')) {
             #enable user
             $job = Start-Job -Name EnableUser -ScriptBlock {param($arg0); Enable-ADAccount -Identity $arg0} -ArgumentList $UsernameTextbox.Text | Wait-Job
             $status = try{Receive-Job -Job $job -ErrorAction Stop} catch {"$_"}
-            if ($status -eq $null) {$results.Add($results.Count + 1, "Account enabled: done")} else {$results.Add($results.Count + 1, "Account enabled: failed"); $errors.Add($errors.Count + 1, $status)}
+            if ($status -eq $null) {
+                $results.Add($results.Count + 1, "Account enabled")
+                $table += [Pscustomobject]@{Result = "Success";Task = "Enable account";Error = ""}
+            } else {
+                $results.Add($results.Count + 1, "Failed to enable account"); $errors.Add($errors.Count + 1, "Enable account:`n$($status)`n")
+                $table += [Pscustomobject]@{Result = "Fail";Task = "Enable account";Error = "$status"}
+            }
         }
         if ($SaveButton.Text.ToLower().Contains('disable')) {
             #disable user
             $job = Start-Job -Name DisableUser -ScriptBlock {param($arg0); Disable-ADAccount -Identity $arg0} -ArgumentList $UsernameTextbox.Text | Wait-Job
             $status = try{Receive-Job -Job $job -ErrorAction Stop} catch {"$_"}
-            if ($status -eq $null) {$results.Add($results.Count + 1, "Account disabled: done")} else {$results.Add($results.Count + 1, "Account disabled: failed"); $errors.Add($errors.Count + 1, $status)}
+            if ($status -eq $null) {
+                $results.Add($results.Count + 1, "Account disabled")
+                $table += [Pscustomobject]@{Result = "Success";Task = "Disable account";Error = ""}
+            } else {
+                $results.Add($results.Count + 1, "Failed to disable account"); $errors.Add($errors.Count + 1, "Disable account:`n$($status)`n")
+                $table += [Pscustomobject]@{Result = "Fail";Task = "Disable account";Error = "$status"}
+            }
         }
         if ($SaveButton.Text.ToLower().Contains('unlock') -or ($NewPasswordTextBox.Text.Length -gt 0 -and !$SaveButton.Text.ToLower().Contains('disable'))) {
             #unlock user
@@ -129,9 +150,14 @@ function save {
             if (!$SaveButton.Text.ToLower().Contains('unlock')) {
                 $addition = " (in addition)"
             }
-            if ($status -eq $null) {$results.Add($results.Count + 1, "Account unlocked$($addition): done")} else {$results.Add($results.Count + 1, "Account unlocked$($addition): failed"); $errors.Add($errors.Count + 1, $status)}
+            if ($status -eq $null) {
+                $results.Add($results.Count + 1, "Account unlocked$($addition)")
+                $table += [Pscustomobject]@{Result = "Success"; Task = "Unlock account$($addition)";Error = ""}
+            } else {
+                $results.Add($results.Count + 1, "Failed to unlock account$($addition)"); $errors.Add($errors.Count + 1, "Unlock account$($addition):`n$($status)")
+                $table += [Pscustomobject]@{Result = "Fail"; Task = "Unlock account$($addition)";Error = "$status"}
+            }
         }
-
         #get user status
         $job = (Start-Job -Name CheckStatus -ScriptBlock {param($arg0); Get-ADUser -Identity $($arg0) -Properties * | Select LockedOut, Enabled, PasswordLastSet, PasswordExpired} -ArgumentList $UsernameTextbox.Text) | Wait-Job
         $status = try{Receive-Job -Job $job -ErrorAction Stop} catch {"$_"}
@@ -151,14 +177,10 @@ function save {
         if ($errors.Count -gt 0 -and $total.Length -ne 0) {$total += "`n"}
         $total += $errors.Values | Out-string
         $total.Replace(": failed", ": failed*")
-
-        foreach($i in $results.Values) {
-            if ($i -like "*: failed") {$n++} else {$y++}
-        }
-        if ($n -gt $y) {
+        if ($errors.Count -eq $results.Count) {
             $StatusLabel.ForeColor = "White"
             $StatusLabel.BackColor = "Red"
-        } elseif ($n -eq $y) {
+        } elseif ($errors.Count -gt 0) {
             $StatusLabel.ForeColor = "Black"
             $StatusLabel.BackColor = "Orange"
         } else {
@@ -178,10 +200,13 @@ function save {
 
                 if (!(Test-Path -Path $(Join-Path -Path $path $file_path))) {
                     New-Item -Path $(Join-Path -Path $path $file_path) -ItemType File
+                    $s = ""
                 } else {
-                    $s = "$("="*100)`n"
+                    $s = "`r`n"
                 }
-                $s + (Get-Date).ToString("dd.MM.yyyy - HH.mm.ss") + ("`nExecuted tasks ($($results.Count))" + $(if($results.Count -gt 0) {":`n$($results.Values | Out-string)"}) + "`nErrors occurred ($($errors.Count))" + $(if($errors.Count -gt 0) {":`n$($errors.Values | Out-string)"})) | Out-File -FilePath $(Join-Path -Path $path $file_path) -Append
+                $t = "Task$(if ($results.Count -ne 1){"s"}) ($($results.Count))"
+                $e = "Error$(if ($errors.Count -ne 1){"s"}) ($($errors.Count))"
+                "$($s)$("#"*35) $((Get-Date).ToString("dd.MM.yyyy - HH.mm.ss")) $("#"*35)`r`n`r`n" + ($table | Format-Table -Wrap -Property @{e='Result';Width=10}, @{e='Task';label=$t;Width=40}, @{e='Error';label=$e;Width=100} | Out-String).Trim() | Out-File -FilePath $(Join-Path -Path $path $file_path) -Append
             } catch {}
         }
         $list = @($status.PasswordExpired, !$status.Enabled, $status.LockedOut)
@@ -197,8 +222,8 @@ function save {
                 $dgv.SelectedRows[0].Cells[$col].Style.SelectionBackColor = "Red"
                 $dgv.SelectedRows[0].Cells[$col].Style.SelectionForeColor = "White"
             } else {
-                $dgv.SelectedRows[0].Cells[$col].Style.BackColor = "White"
-                $dgv.SelectedRows[0].Cells[$col].Style.ForeColor = "Black"
+                $dgv.SelectedRows[0].Cells[$col].Style.BackColor = $dgv.SelectedRows[0].Cells['Name'].Style.BackColor
+                $dgv.SelectedRows[0].Cells[$col].Style.ForeColor = $dgv.SelectedRows[0].Cells['Name'].Style.ForeColor
                 $dgv.SelectedRows[0].Cells[$col].Style.SelectionBackColor = "Yellow"
                 $dgv.SelectedRows[0].Cells[$col].Style.SelectionForeColor = "Blue"
             }
@@ -209,6 +234,37 @@ function save {
         $StatusLabel.Text = "Show report"
         $StatusLabel.FlatAppearance.BorderSize = 1
         $StatusLabelTotal.Text = $Error[0]
+    }
+}
+
+function switchview {
+    $list = @($UserGrid, $UserRolesGrid, $UserPropertiesGrid, $GroupGrid)
+    switch ($UsernameLabel.Text) {
+        "Object" {
+            #user will be selected
+            $UsernameLabel.Text = "User"
+            $AdminUpdate.Visible = $UserTypeCheckBox.Visible = $true
+            $SearchGroupTextBox.Visible = $false
+            $SearchUserTextBox.Visible = $true
+            if ($UsernameTextbox.Text.Length -gt 0) {$InfoButton.Visible = $RoleButton.Visible = $true} else {$InfoButton.Visible = $RoleButton.Visible = $false}
+            $GroupGrid.Visible = $false; $UserGrid.Visible = $true
+            $GroupsTextbox.Visible = $UserRolesGrid.Visible = $false
+            $UsernameTextbox.Visible = $true
+            $SearchUserTextBox.Focus()
+        }
+        "Printer" {$UsernameLabel.Text = "Object"}
+        "Group" {$UsernameLabel.Text = "Printer"}
+        "User" {
+                
+            $UsernameLabel.Text = "Group"
+            $AdminUpdate.Visible = $UserTypeCheckBox.Visible = $InfoButton.Visible = $RoleButton.Visible = $false
+            $SearchUserTextBox.Visible = $UserRolesGrid.Visible = $false
+            $SearchGroupTextBox.Visible = $true
+            $UserGrid.Visible = $false; $GroupGrid.Visible = $true
+            $UsernameTextbox.Visible = $false
+            $GroupsTextbox.Visible = $true
+            $SearchGroupTextBox.Focus()
+        }
     }
 }
 
@@ -349,12 +405,10 @@ function refresh {
             } else {
                 $job = Start-Job -Name fetch -ScriptBlock {param($arg0); Get-ADUser -Filter "GivenName -like '*' -and (Name -like '$($arg0)' -or DisplayName -like '$($arg0)' -or SamAccountName -like '$($arg0)')" -Properties Name, DisplayName, SamAccountName, LockedOut, PasswordExpired, PasswordLastSet, GivenName} -ArgumentList $SearchVal
             }
-            if (($SearchUserTextBox.Text.Length -gt 2 -and !$UserTypeCheckBox.Checked) -or $UserTypeCheckBox.Checked){
-            while((Get-Job -State Running | Where-Object {$_.Name -eq "fetch"}).Count -gt 0) {
-                $i++
-                $UserGrid_QueryLabel.Text = "Fetching data `($($i)`)"
-                Start-Sleep -Milliseconds 900
-            }} else {$UserGrid_QueryLabel.Text = "Fetching data"; Wait-Job -Job $job}
+            while ( $job.State -eq [System.Management.Automation.JobState]::Running ) {
+                $UserGrid_QueryLabel.Text = "Fetching data ($($stopwatch.Elapsed.Minutes * 60 + $stopwatch.Elapsed.Seconds))"
+                $UserGrid_QueryLabel.Refresh()
+            }
             $users = Receive-Job -Job $job
         }catch{$UserGrid_QueryLabel.Text = "Error occurred: $Error[0]"; write-host $Error[0]}
         if ($users) {
@@ -370,6 +424,8 @@ function refresh {
                     if (!$i.Enabled) {row_color "Enabled"}
                     if ($i.LockedOut) {row_color "Locked"}
                     $dgv.AutoResizeRow($dgv.RowCount-1, [System.Windows.Forms.DataGridViewAutoSizeRowMode]::AllCellsExceptHeader)
+                    $UserGrid_QueryLabel.Text = "Fetching data ($($stopwatch.Elapsed.Minutes * 60 + $stopwatch.Elapsed.Seconds))"
+                    $UserGrid_QueryLabel.Refresh()
                 } catch {Write-Host $Error}
             }
             $dgv.Sort($dgv.Columns['Username'],'Ascending')
@@ -641,46 +697,19 @@ function start-script{
     $BottomPanel.BackColor = "Transparent"
     $form.Controls.Add($BottomPanel)
 
-    #$UsernameLabel = New-Object System.Windows.Forms.Label
-    #$UsernameLabel.Location = New-Object System.Drawing.Size(4,5)
-    #$UsernameLabel.Size = New-Object System.Drawing.Size(50,24)
-    $UsernameLabel = New-Object System.Windows.Forms.Button
-    $UsernameLabel.Location = New-Object System.Drawing.Size(0, 2)
-    $UsernameLabel.Size = New-Object System.Drawing.Size(55,25)
-    $UsernameLabel.Font = New-Object System.Drawing.Font("Calibri",10.5,[System.Drawing.FontStyle]::Regular)
-    $UsernameLabel.ForeColor = "Blue"
+    $UsernameLabel = New-Object System.Windows.Forms.Label
+    $UsernameLabel.Location = New-Object System.Drawing.Size(4,5)
+    $UsernameLabel.Size = New-Object System.Drawing.Size(50,24)
+    #$UsernameLabel = New-Object System.Windows.Forms.Button
+    #$UsernameLabel.Location = New-Object System.Drawing.Size(0, 2)
+    #$UsernameLabel.Size = New-Object System.Drawing.Size(55,25)
+    #$UsernameLabel.Font = New-Object System.Drawing.Font("Calibri",10.5,[System.Drawing.FontStyle]::Regular)
+    #$UsernameLabel.ForeColor = "Blue"
     $UsernameLabel.Text = "User"
     $UsernameLabel.FlatStyle = "Flat"
     $UsernameLabel.BackColor = "Transparent"
     $UsernameLabel.Add_Click({
-        $list = @($UserGrid, $UserRolesGrid, $UserPropertiesGrid, $GroupGrid)
-        switch ($UsernameLabel.Text) {
-            "Object" {
-                #user will be selected
-                $UsernameLabel.Text = "User"
-                $AdminUpdate.Visible = $UserTypeCheckBox.Visible = $true
-                $SearchGroupTextBox.Visible = $false
-                $SearchUserTextBox.Visible = $true
-                if ($UsernameTextbox.Text.Length -gt 0) {$InfoButton.Visible = $RoleButton.Visible = $true} else {$InfoButton.Visible = $RoleButton.Visible = $false}
-                $GroupGrid.Visible = $false; $UserGrid.Visible = $true
-                $GroupsTextbox.Visible = $UserRolesGrid.Visible = $false
-                $UsernameTextbox.Visible = $true
-                $SearchUserTextBox.Focus()
-            }
-            "Printer" {$UsernameLabel.Text = "Object"}
-            "Group" {$UsernameLabel.Text = "Printer"}
-            "User" {
-                
-                $UsernameLabel.Text = "Group"
-                $AdminUpdate.Visible = $UserTypeCheckBox.Visible = $InfoButton.Visible = $RoleButton.Visible = $false
-                $SearchUserTextBox.Visible = $UserRolesGrid.Visible = $false
-                $SearchGroupTextBox.Visible = $true
-                $UserGrid.Visible = $false; $GroupGrid.Visible = $true
-                $UsernameTextbox.Visible = $false
-                $GroupsTextbox.Visible = $true
-                $SearchGroupTextBox.Focus()
-            }
-        }
+        #switchview
     })
     $BottomPanel.Controls.Add($UsernameLabel)
     
@@ -816,7 +845,9 @@ function start-script{
             }catch{}
         }
     })
-
+    $dgv.Add_Sorted({
+        row_colors "PaleTurquoise"
+    })
     $dgv.Height = $($UserGrid.Height - 20)
     $UserPropertiesGrid.Height = $($dgv.Height + 20)
     
