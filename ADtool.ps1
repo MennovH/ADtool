@@ -1,4 +1,19 @@
-﻿#Created by: MennovH, 2021
+﻿<#
+    .AUTHOR
+        Menno vH (2021)
+
+    .DESCRIPTION
+        AD functionality for users and groups
+        - Disable/enable accounts
+        - Unlock accounts
+        - Reset passwords w/ prompts
+        - Restore passwords w/ prompts
+        - Add users to groups
+        - Remove users from groups
+        - Easy search; find users/groups based on (parts of) their (user)names
+        - Easy view; show multiple users and their properties
+        - Tasklog per user; logs every executed task per user
+#>
 
 [void] [System.Reflection.Assembly]::LoadWithPartialName("System.Drawing") 
 [void] [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms")
@@ -25,18 +40,27 @@ if (Test-Path .\images) {
     Foreach-Object {
         $t = "$((Get-Culture).TextInfo.ToTitleCase($_.BaseName))Image"
         if (!(Test-Path variable:$t)){
-        New-Variable -Name "$t" -Value ([System.Drawing.Image]::FromFile($($_.FullName)))
+            New-Variable -Name "$t" -Value ([System.Drawing.Image]::FromFile($($_.FullName)))
         }
     }
 }
 
-function fetch_user {
+function Fetch-Users {
     if ($UserType.ForeColor -eq "Darkgreen") {$type = "-like"} else {$type = "-notlike"}
     if ($DomainComboBox.Text -ne "Entire directory") {$Domains = $DomainComboBox.Text} else {$Domains = $global:Domains}
-    return Start-Job -ScriptBlock {param($Type,$PrefixSuffix,$SearchVal,$Domains); ForEach ($Domain in $Domains) {Get-ADUser -Server $Domain -Filter "GivenName -like '*' -and SamAccountName $($Type) '$($PrefixSuffix)' -and (Name -like '$($SearchVal)' -or DisplayName -like '$($SearchVal)' -or SamAccountName -like '$($SearchVal)')" -Properties Name, DisplayName, SamAccountName, LockedOut, PasswordExpired, PasswordLastSet, GivenName, pwdlastset}} -ArgumentList $Type, $PrefixSuffix, $SearchVal, $Domains
+    return Start-Job `
+        -ScriptBlock { `
+            param ($Type, $PrefixSuffix, $SearchVal, $Domains)
+            ForEach ($Domain in $Domains) { `
+                Get-ADUser `
+                    -Server $Domain `
+                    -Filter "GivenName -like '*' -and SamAccountName $($Type) '$($PrefixSuffix)' -and (Name -like '$($SearchVal)' -or DisplayName -like '$($SearchVal)' -or SamAccountName -like '$($SearchVal)')" `
+                    -Properties Name, DisplayName, SamAccountName, LockedOut, PasswordExpired, PasswordLastSet, GivenName, pwdlastset
+            }
+        } -ArgumentList $Type, $PrefixSuffix, $SearchVal, $Domains
 }
 
-function fetch_roles {
+function Fetch-Roles {
     $UserRolesGrid_QueryLabel.Text = "Preparing fetch"
     $AllRoles.Rows.Clear()
     $form.Update()
@@ -50,8 +74,16 @@ function fetch_roles {
     $Stopwatch.Start()
     if ($SearchRoleTextBox.Text.Length -eq 0) {$SearchVal = "*"} else {$SearchVal = "*$($SearchRoleTextBox.Text)*"}
     if ($DomainComboBox.Text -ne "Entire directory") {$Domains = $DomainComboBox.Text} else {$Domains = $global:Domains}
-    $Job = Start-Job -ScriptBlock {param($Group,$Domains); ForEach ($Domain in $Domains) {Get-ADGroup  -Filter "SamAccountName -like '$($Group)' -or Description -like '$($Group)'" -Properties SamAccountName, Description, GroupCategory, ManagedBy}} -ArgumentList $SearchVal, $Domains
-    $Stopped = while_fetching $Job $Stopwatch "search_role"
+
+    $Job = Start-Job -ScriptBlock { `
+        param($Group, $Domains)
+        ForEach ($Domain in $Domains) { `            Get-ADGroup `
+                -Filter "SamAccountName -like '$($Group)' -or Description -like '$($Group)'" `
+                -Properties SamAccountName, Description, GroupCategory, ManagedBy
+            }
+        } -ArgumentList $SearchVal, $Domains
+
+    $Stopped = While-Fetch $Job $Stopwatch "search_role"
     $status = try{Receive-Job -Job $Job -ErrorAction Stop} catch {"$_"}
     $j = @()
     if ($status) {
@@ -77,22 +109,56 @@ function fetch_roles {
         $UserRolesGrid_QueryLabel.Text = "Fetched $($AllRoles.RowCount) rows in $($time) - Query: `"$($SearchVal)`""
     } else {
         $UserRolesGrid_QueryLabel.Text = "Enter a value and/or press enter to search user. Duration time depends on search value"
-        check
+        Check-Components
     }
     if ($Stopped) {$UserRolesGrid_QueryLabel.Text = $UserRolesGrid_QueryLabel.Text.Replace("- Query","(stopped by user) - Query")}
 }
 
-function set_password {
+function Set-Password {
     if ($DomainComboBox.Text -ne "Entire directory") {$Domains = $DomainComboBox.Text} else {$Domains = $global:Domains}
     if ($PromptUser.Checked) {$action = $true} else {$action = $false}
+
     if ($RestoreRadioButton.Checked) {
-        return Start-Job -Name Restore -ScriptBlock {param($User,$Old,$New,$Domains,$action); ForEach($Domain in $Domains) {Set-ADAccountPassword -Server $Domain -Identity $User -OldPassword (ConvertTo-SecureString -AsPlainText $Old -Force) -NewPassword (ConvertTo-SecureString -AsPlainText $New -Force) -PassThru | Set-ADUser -ChangePasswordAtLogon $action}} -ArgumentList $UsernameTextbox.Text, $OldPasswordTextBox.Text, $NewPasswordTextBox.Text, $Domains, $action
+        return Start-Job `
+            -Name Restore `
+            -ScriptBlock { `
+                param($User, $Old, $New, $Domains, $action)
+                ForEach($Domain in $Domains) { `
+                    Set-ADAccountPassword `
+                        -Server $Domain `
+                        -Identity $User `                        -OldPassword (ConvertTo-SecureString `
+                            -AsPlainText $Old -Force) `
+                        -NewPassword (
+                            ConvertTo-SecureString `
+                                -AsPlainText $New `
+                                -Force
+                            ) `
+                        -PassThru | `
+                    Set-ADUser `
+                        -ChangePasswordAtLogon $action
+                }
+            } -ArgumentList $UsernameTextbox.Text, $OldPasswordTextBox.Text, $NewPasswordTextBox.Text, $Domains, $action
+
     } else {
-        return Start-Job -Name Reset -ScriptBlock {param($User,$New,$Domains,$action); ForEach ($Domain in $Domains) {Set-ADAccountPassword -Server $Domain -Identity $User -Reset -NewPassword (ConvertTo-SecureString -AsPlainText $New -Force) -PassThru | Set-ADUser -ChangePasswordAtLogon $action}} -ArgumentList $UsernameTextbox.Text, $NewPasswordTextBox.Text, $Domains, $action
+        return Start-Job `
+            -Name Reset `
+            -ScriptBlock {`
+                param($User, $New, $Domains, $action)
+                ForEach ($Domain in $Domains) {`
+                    Set-ADAccountPassword `
+                        -Server $Domain `
+                        -Identity $User `
+                        -Reset `
+                        -NewPassword (`
+                            ConvertTo-SecureString `
+                                -AsPlainText $New `
+                                -Force
+                        ) `
+                        -PassThru | Set-ADUser -ChangePasswordAtLogon $action}} -ArgumentList $UsernameTextbox.Text, $NewPasswordTextBox.Text, $Domains, $action
     }
 }
 
-function save {
+function Save-Account {
     if ($DomainComboBox.Text -ne "Entire directory") {$Domains = $DomainComboBox.Text} else {$Domains = $global:Domains}
     $Results = New-Object System.Collections.Generic.Dictionary"[Int,String]"
     $Errors = New-Object System.Collections.Generic.Dictionary"[Int,String]"
@@ -133,14 +199,13 @@ function save {
             $MessageBody = "Proceed with the following role update(s)?`n`nAdd ($($Add.Count))" + $(if($Add.Count -gt 0) {":`n$($Add | Out-String)"} else {"`n"}) + "`nRemove ($($Remove.Count))" + $(if($Remove.Count -gt 0) {":`n$($Remove | Out-String)"})
             $MessageTitle = "Confirm choice"
             $Result = [Microsoft.VisualBasic.Interaction]::MsgBox($MessageBody,'YesNo,DefaultButton2,SystemModal,Critical',$MessageTitle)
-
         }
     }
     $StatusLabel.Text = "Running $($Jobs.Count) job$(if ($Jobs.Count -ne 1) {"s"}) ($($Stopwatch.Elapsed.Minutes * 60 + $Stopwatch.Elapsed.Seconds))"
     $StatusLabel.Refresh()
     # reset/restore password
     if (($NewPasswordTextBox.Text.Length -gt 0 -and $ResetRadioButton.Checked) -or ($NewPasswordTextBox.Text.Length -0 -and $OldPasswordTextBox.Text.Length -gt 0 -and $RestoreRadioButton.Checked) -or ($PrompUser.Checked -and $NewPasswordTextBox.Text.Length -gt 0 -and !$SaveButton.Text.ToLower().Contains('disable'))) {
-        $Jobs += set_password
+        $Jobs += Set-Password
         $StatusLabel.Text = "Running $($Jobs.Count) job$(if ($Jobs.Count -ne 1) {"s"})"
         $StatusLabel.Refresh()
     }
@@ -170,10 +235,30 @@ function save {
         if ($Result -eq "Yes") {
             $Actions = $Add + $Remove
             foreach($Group in $Actions){
+
                 if ($Group -in $Add) {
-                    $Jobs += Start-Job -Name "+$($Group)" -ScriptBlock {param($User,$Group,$Domains); ForEach ($Domain in $Domains) {Add-ADGroupMember -Server $Domain -Identity $User -Members $Group}} -ArgumentList $Group, $UsernameTextbox.Text, $Domains
+                    $Jobs += Start-Job `
+                        -Name "+$($Group)" `
+                        -ScriptBlock {`
+                            param($User, $Group, $Domains)
+                            ForEach ($Domain in $Domains) { `                                Add-ADGroupMember `
+                                    -Server $Domain `
+                                    -Identity $User `
+                                    -Members $Group
+                            }
+                        } -ArgumentList $Group, $UsernameTextbox.Text, $Domains
                 } else {
-                    $Jobs += Start-Job -Name "-$($Group)" -ScriptBlock {param($User,$Group,$Domains); ForEach ($Domain in $Domains) {Remove-ADGroupMember -Server $Domain -Identity $User -Members $Group -Confirm:$false}} -ArgumentList $Group, $UsernameTextbox.Text, $Domains
+
+                    $Jobs += Start-Job `
+                        -Name "-$($Group)" `                        -ScriptBlock { `                            param( $User, $Group, $Domains)
+                            ForEach ($Domain in $Domains) {`
+                                Remove-ADGroupMember `
+                                    -Server $Domain `
+                                    -Identity $User `
+                                    -Members $Group `
+                                    -Confirm:$false
+                            }
+                        } -ArgumentList $Group, $UsernameTextbox.Text, $Domains
                 }
                 $StatusLabel.Text = "Running $($Jobs.Count) job$(if ($Jobs.Count -ne 1) {"s"})"
                 $StatusLabel.Refresh()
@@ -196,21 +281,20 @@ function save {
             try{
                 Receive-Job -Job $Job -ErrorAction Stop;
                 $Results.Add($Results.Count + 1,"$($Job.Name.Substring(0,1).Replace("+", "Added to").Replace("-", "Removed from ")) '$($Name)'")
-                $Table += [Pscustomobject]@{Result = "Success";Task = "$($Job.Name.Substring(0,1).Replace("+", "Add to").Replace("-", "Remove from ")) '$($Name)'";Error = ""}
+                $Table += [Pscustomobject]@{Result = "Success";Task = "$($Job.Name.Substring(0,1).Replace("+", "Added to").Replace("-", "Removed from ")) '$($Name)'";Error = ""}
             } catch {
-                $Results.Add($Results.Count + 1,"$($Job.Name.Substring(0,1).Replace("+", "Failed to add to").Replace("-", "Failed to remove from ")) '$($Name)'")
-                $Errors.Add($Errors.Count + 1, "$($Description):`n$($_)")
-                $Table += [Pscustomobject]@{Result = "Fail";Task = "$($j.Name.Substring(0,1).Replace("+", "Add to").Replace("-", "Remove from ")) '$($Name)'";Error = "$_"}
+                $Errors.Add($Errors.Count + 1, "Failed to $($Job.Name.Substring(0,1).Replace("+", "Add to").Replace("-", "Remove from ")) '$($Name)':`n$($_)")
+                $Table += [Pscustomobject]@{Result = "Fail";Task = "Failed to $($j.Name.Substring(0,1).Replace("+", "add to").Replace("-", "remove from ")) '$($Name)'";Error = "$_"}
             }
         } else {
             $Name = $Job.Name
             switch ($Name) {
                 "Unlock" {$Description= "$($Name) account$($Addition)"; $Success="Account $($Name.ToLower())ed$($Addition)"; $Failure="Failed to $($Name.ToLower()) account$($Addition)"}
-                "Reset" {$Description= "$($Name) password$($action)"; $Success="Password $($Name.ToLower())$($action)";$Failure="Failed to $($Name.ToLower()) password$($action)"}
-                "Restore" {$Description= "$($Name) password$($action)"; $Success="Password $($Name.ToLower())d$($action)";$Failure="Failed to $($Name.ToLower()) password$($action)"}
+                "Reset" {$Description= "$($Name) password$($action)"; $Success="Password has been $($Name.ToLower())$($action)";$Failure="Failed to $($Name.ToLower()) password$($action)"}
+                "Restore" {$Description= "$($Name) password$($action)"; $Success="Password has been $($Name.ToLower())d$($action)";$Failure="Failed to $($Name.ToLower()) password$($action)"}
                 "Enable" {$Description= "$($Name) account"; $Success="Account $($Name.ToLower())d";$Failure="Failed to $($Name.ToLower()) account"}
                 "Disable" {$Description= "$($Name) account"; $Success="Account $($Name.ToLower())d";$Failure="Failed to $($Name.ToLower()) password"}
-                "Prompt" {$Description= "$($Name) user to change password"; $Success="$($Name) user to change password";$Failure="Failed to $($Name.ToLower()) user to change password"}
+                "Prompt" {$Description= "$($Name) user to change password"; $Success="User will be $($Name.ToLower())ed to change password";$Failure="Failed to $($Name.ToLower()) user to change password"}
             }
             try{
                 Receive-Job -Job $Job -ErrorAction Stop
@@ -218,12 +302,24 @@ function save {
                 $Table += [Pscustomobject]@{Result = "Success";Task = "$($Success)";Error = ""}
             } catch {
                 $Errors.Add($Errors.Count + 1, "$($Failure):`n$($_)`n")
-                $Table += [Pscustomobject]@{Result = "Fail";Task = "$($Description)";Error = "$_"}
+                $Table += [Pscustomobject]@{Result = "Fail";Task = "$($Failure)";Error = "$_"}
             }
         }
     }
     #get user status
-    $Job = Start-Job -ScriptBlock {param($User,$Domains); ForEach($Domain in $Domains) {Get-ADUser -Server $Domain -Identity $User -Properties * | Select LockedOut, Enabled, PasswordLastSet, PasswordExpired, pwdlastset}} -ArgumentList $UsernameTextbox.Text, $Domains | Wait-Job
+    $Job = Start-Job `
+        -ScriptBlock {`
+            param ($User, $Domains)
+            ForEach ($Domain in $Domains) { `
+                Get-ADUser `
+                    -Server $Domain `
+                    -Identity $User `
+                    -Properties * | `
+                Select LockedOut, Enabled, PasswordLastSet, PasswordExpired, pwdlastset
+            }
+        } -ArgumentList $UsernameTextbox.Text, $Domains | `
+        Wait-Job
+
     $Status = try{Receive-Job -Job $Job -ErrorAction Stop} catch {"$_"}
 
     $Job = (Start-Job -ScriptBlock {(Get-ADDefaultDomainPasswordPolicy).MaxPasswordAge.Days}) | Wait-Job
@@ -234,11 +330,9 @@ function save {
 
     if ($status.PasswordLastSet.Length -gt 0) {
         $dgv.CurrentRow.Cells['Password expires'].Value = [datetime]($dgv.CurrentRow.Cells['Password last set'].Value).AddDays($MaxPwdAge)
-    } else { #if ($status.pwdlastset -gt 0) {
+    } else {
         $dgv.CurrentRow.Cells['Password expires'].Value = $Status.PasswordLastSet
-    }# else {
-     #   $dgv.CurrentRow.Cells['Password expires'].Value = "Change at logon"
-    #}
+    }
     $dgv.CurrentRow.Cells['Enabled'].Value = $Status.Enabled
     if ($Status.Enabled) {$EnableCheckBox.Text = "Disable"} else {$EnableCheckBox.Text = "Enable"}
     $EnableCheckBox.Checked = $false
@@ -262,7 +356,7 @@ function save {
         try {
             $path = ".\tasklog"
             If(!(test-path $path)) {
-                    New-Item -ItemType Directory -Force -Path $path
+                New-Item -ItemType Directory -Force -Path $path
             }
             $file_path = "$($UsernameTextbox.Text).txt"
 
@@ -284,7 +378,7 @@ function save {
             1 {$Column = "Enabled"}
             2 {$Column = "Locked"}
         }
-        if ($StatusList[$Item] -and $StatusList[$Item] -ne $null) {
+        if (($Item -eq 0 -and $Status.pwdlastset -eq 0) -or ($StatusList[$Item] -and $StatusList[$Item] -ne $null)) {
             $dgv.SelectedRows[0].Cells[$Column].Style.BackColor = "Orange"
             $dgv.SelectedRows[0].Cells[$Column].Style.ForeColor = "Black"
             $dgv.SelectedRows[0].Cells[$Column].Style.SelectionBackColor = "Red"
@@ -298,7 +392,7 @@ function save {
     }
 }
 
-function switchview {
+function Switch-View {
     $list = @($UserGrid, $UserRolesGrid, $UserPropertiesGrid, $GroupGrid)
     switch ($UsernameLabel.Text) {
         "Object" {
@@ -328,7 +422,7 @@ function switchview {
     }
 }
 
-function check {
+function Check-Components {
     $vars = @($OldPasswordTextBox, $NewPasswordTextBox, $SaveButton)
     if ($UsernameTextbox.Text.Length -eq 0) {
         foreach($i in $vars) {
@@ -409,14 +503,14 @@ function check {
     $StatusLabel.Visible = $false
 }
 
-function row_color ($item) {
+function Set-Color ($item) {
     $dgv.Rows[$dgv.RowCount -1].Cells[$item].Style.BackColor = "Orange"
     $dgv.Rows[$dgv.RowCount -1].Cells[$item].Style.ForeColor = "Black"
     $dgv.Rows[$dgv.RowCount -1].Cells[$item].Style.SelectionBackColor = "Red"
     $dgv.Rows[$dgv.RowCount -1].Cells[$item].Style.SelectionForeColor = "White"
 }
 
-function row_colors ($val) {
+function Set-Colors ($val) {
     for ($i=0;$i -lt $dgv.RowCount;$i++){
         if ($($i%2) -eq 1) {
             $dgv.Rows[$i].DefaultCellStyle.BackColor = $val
@@ -426,16 +520,14 @@ function row_colors ($val) {
     }
 }
 
-function while_fetching ($Job, $Stopwatch, $Type) {
+function While-Fetch ($Job, $Stopwatch, $Type) {
     $Stopped = $false
     switch ($Type) {
-        "refresh" {$Label = $UserGrid_QueryLabel}
-        "refresh_group" {$Label = $GroupGrid_QueryLabel}
+        "Refresh-Users" {$Label = $UserGrid_QueryLabel}
+        "Refresh-Groups" {$Label = $GroupGrid_QueryLabel}
         "info" {$Label = $UserRolesGrid_QueryLabel}
         "search_role" {$Label = $UserRolesGrid_QueryLabel}
     }
-
-
     while ($Job.State -eq [System.Management.Automation.JobState]::Running) {
         $Label.Text = "Running ($($Stopwatch.Elapsed.Minutes * 60 + $Stopwatch.Elapsed.Seconds)) - Fetching data"
         if ($($Stopwatch.Elapsed.Minutes * 60 + $Stopwatch.Elapsed.Seconds)%10 -eq 0 -and $run -eq 0) {
@@ -451,8 +543,7 @@ function while_fetching ($Job, $Stopwatch, $Type) {
     return $Stopped
 }
 
-
-function refresh {
+function Refresh-Users {
     if ($SearchUserTextBox.Text.Replace("*","").Length -eq 0) {$SearchVal = "*"} else {$SearchVal = "*$($SearchUserTextBox.Text)*"}
     $UserRolesGrid.Visible = $UserPropertiesGrid.Visible = $false
     $UserGrid.Visible = $true
@@ -470,7 +561,7 @@ function refresh {
     $UsernameTextbox.Text = ""
     $EnableCheckBox.Text = ""
     $EnableCheckBox.Checked = $false
-    check
+    Check-Components
     $i = 0
     if ($BlockLabel.Text -ne "x") {
         $MaxPwdAge = (Get-ADDefaultDomainPasswordPolicy).MaxPasswordAge.Days
@@ -492,8 +583,8 @@ function refresh {
                     }
                 }
             }
-            $Job = fetch_user
-            $Stopped = while_fetching $Job $Stopwatch "refresh"
+            $Job = Fetch-Users
+            $Stopped = While-Fetch $Job $Stopwatch "Refresh-Users"
             $users = Receive-Job -Job $Job
         }catch{$UserGrid_QueryLabel.Text = "Error occurred: $Error[0]"}
         if ($users) {
@@ -501,14 +592,12 @@ function refresh {
                 if ($UserType.ForeColor -ne "Darkgreen" -and $UserType.ForeColor -ne "Orange" -and $i.SamAccountName -like $PrefixSuffix) {continue}
                 if ($i.PasswordLastSet.Length -gt 0) {
                     $dgv.Rows.Add($i.DisplayName,$i.Name,$i.SamAccountName,$i.LockedOut, $i.Enabled, [datetime]($i.PasswordLastSet).AddDays($MaxPwdAge), $i.PasswordLastSet)
-                } else { #if ($pwdlastset -gt 0) {
+                } else {
                     $dgv.Rows.Add($i.DisplayName,$i.Name,$i.SamAccountName,$i.LockedOut, $i.Enabled, $i.PasswordLastSet, $i.PasswordLastSet)
-                }# else {
-                 #   $dgv.Rows.Add($i.DisplayName,$i.Name,$i.SamAccountName,$i.LockedOut, $i.Enabled, "Change at logon", $i.PasswordLastSet)
-                #}
-                if ($i.PasswordExpired -or $i.pwdlastset -eq 0) {row_color "Password expires"}
-                if (!$i.Enabled) {row_color "Enabled"}
-                if ($i.LockedOut) {row_color "Locked"}
+                }
+                if ($i.PasswordExpired -or $i.pwdlastset -eq 0) {Set-Color "Password expires"}
+                if (!$i.Enabled) {Set-Color "Enabled"}
+                if ($i.LockedOut) {Set-Color "Locked"}
                 $dgv.AutoResizeRow($dgv.RowCount-1, [System.Windows.Forms.DataGridViewAutoSizeRowMode]::AllCellsExceptHeader)
                 $UserGrid_QueryLabel.Text = "Running ($($Stopwatch.Elapsed.Minutes * 60 + $Stopwatch.Elapsed.Seconds))$(if ($Stopped) {' - Stopped by user'}) - Processing data"
                 $UserGrid_QueryLabel.Refresh()
@@ -524,7 +613,7 @@ function refresh {
         $UserGrid_QueryLabel.Text = "Fetched $($dgv.RowCount) rows in $($time) - Query: `"$($SearchVal)`""
     } else {
         $UserGrid_QueryLabel.Text = "Enter a value and/or press enter to search user. Duration time depends on search value"
-        check
+        Check-Components
     }
     if ($Stopped) {$UserGrid_QueryLabel.Text = $UserGrid_QueryLabel.Text.Replace("- Query","(stopped by user) - Query")}
     $BlockLabel.Text = ""
@@ -546,7 +635,7 @@ function refresh {
     }
 }
 
-function refresh_group {
+function Refresh-Groups {
     $BlockLabel.Text = "x"
     if ($DomainComboBox.Text -ne "Entire directory") {$Domains = $DomainComboBox.Text} else {$Domains = $global:Domains}
     if ($SearchUserTextBox.Text.Replace("*","").Length -eq 0) {$SearchVal = "*"} else {$SearchVal = "*$($SearchUserTextBox.Text)*"}    
@@ -562,7 +651,7 @@ function refresh_group {
     $i = 0
     if ($SearchGroupTextBox.Text.Length -eq 0) {$SearchVal = "*"} else {$SearchVal = "*$($SearchGroupTextBox.Text)*"}
     $Job = Start-Job -ScriptBlock {param($Group,$Domains); ForEach($Domain in $Domains) {Get-ADGroup -Server $Domain -Filter "SamAccountName -like '$($Group)' -or Description -like '$($Group)'" -Properties SamAccountName, Description, GroupCategory, ManagedBy}} -ArgumentList $SearchVal, $Domains
-    $Stopped = while_fetching $Job $Stopwatch "refresh_group"
+    $Stopped = While-Fetch $Job $Stopwatch "Refresh-Groups"
     $status = try{Receive-Job -Job $Job -ErrorAction Stop} catch {"$_"}
     if ($status) {
         foreach ($i in $status) {
@@ -585,13 +674,62 @@ function refresh_group {
     $BlockLabel.Text = ""
 }
 
-function fetch_info {
+function Fetch-UserInfo {
     $UserProperties.Rows.Clear()
-    $Job = Start-Job -ScriptBlock {param($User); Get-ADUser -Identity $User -Properties GivenName,Surname,DisplayName,Name,SamAccountName,EmployeeID,
-    EmployeeNumber,employeeType,City,EmailAddress,DoesNotRequirePreAuth,Enabled,LockedOut,LockoutTime,LogonCount,LogonWorkstations,mail,mailNickname,Manager,MobilePhone,Modified,
-    ModifyTimeStamp,Office,OfficePhone,Organization,PasswordExpired,PasswordLastSet,PasswordNeverExpires,PasswordNotRequired,physicalDeliveryOfficeName,PostalCode,
-    ProtectedFromAccidentalDeletion,ProfilePath,showInAddressBook,SmartcardLogonRequired,State,StreetAddress,targetAddress,UserPrincipalName,whenCreated,whenChanged,HomeDirectory,
-    HomeDrive,HomePhone,Fax,Title,Department} -ArgumentList $UsernameTextBox.Text | Wait-Job
+    $Job = Start-Job `
+        -ScriptBlock {`
+            param ($User)
+            Get-ADUser `
+                -Identity $User `
+                -Properties `
+                    GivenName,
+                    Surname,
+                    DisplayName,
+                    Name,
+                    SamAccountName,
+                    EmployeeID,
+                    EmployeeNumber,
+                    employeeType,
+                    City,
+                    EmailAddress,
+                    DoesNotRequirePreAuth,
+                    Enabled,
+                    LockedOut,
+                    LockoutTime,
+                    LogonCount,
+                    LogonWorkstations,
+                    mail,
+                    mailNickname,
+                    Manager,
+                    MobilePhone,
+                    Modified,
+                    ModifyTimeStamp,
+                    Office,
+                    OfficePhone,
+                    Organization,
+                    PasswordExpired,
+                    PasswordLastSet,
+                    PasswordNeverExpires,
+                    PasswordNotRequired,
+                    physicalDeliveryOfficeName,
+                    PostalCode,
+                    ProtectedFromAccidentalDeletion,
+                    ProfilePath,
+                    showInAddressBook,
+                    SmartcardLogonRequired,
+                    State,
+                    StreetAddress,
+                    targetAddress,
+                    UserPrincipalName,
+                    whenCreated,
+                    whenChanged,
+                    HomeDirectory,
+                    HomeDrive,
+                    HomePhone,
+                    Fax,
+                    Title,
+                    Department
+        } -ArgumentList $UsernameTextBox.Text | Wait-Job
     $status = try{Receive-Job -Job $Job -ErrorAction Stop} catch {"$_"}
     $list = @(@("Given Name",$status.GivenName),
             @("Surname",$status.Surname),
@@ -665,7 +803,7 @@ function fetch_info {
     $CheckBoxButton.Visible = $false
 }
 
-function memberof {
+function Fetch-Roles {
     if ($CurrentRoles.RowCount -eq 0) {
         $CurrentRoles.Rows.Clear()
         $BackupRoles.Rows.Clear()
@@ -676,7 +814,18 @@ function memberof {
     if ($CurrentRoles.RowCount -eq 0) {
         $UserRolesGridStatusLabel.Text = ""
         $UserRolesGridStatusLabel.BackColor = "Transparent"
-        $Job = Start-Job -ScriptBlock {param($arg0); $(Get-ADUser -Filter "SamAccountName -eq '$($arg0)'" -Properties MemberOf).memberof | Get-ADGroup -Properties SamAccountName, Description, GroupCategory, ManagedBy} -ArgumentList $UsernameTextbox.Text | Wait-Job
+        $Job = Start-Job `
+            -ScriptBlock {`
+                param($arg0)
+                $(Get-ADUser `
+                    -Filter "SamAccountName -eq '$($arg0)'" `
+                    -Properties MemberOf
+                ).memberof | `
+                Get-ADGroup `
+                    -Properties SamAccountName, Description, GroupCategory, ManagedBy
+            } -ArgumentList $UsernameTextbox.Text | `
+            Wait-Job
+
         $status = try{Receive-Job -Job $Job -ErrorAction Stop} catch {"$_"}
         if ($status) {
             foreach ($i in $status) {
@@ -694,7 +843,7 @@ function memberof {
     $BlockLabel.Text = ""
 }
 
-function set-admin-prefix {
+function Set-AdminPreSuffix {
     if ($AdminTextBox.Text.Length -gt 0){
         $PrefixSuffix = $AdminTextBox.Text.Trim("*")
         $AdminTextBox.Text = $PrefixSuffix
@@ -712,7 +861,7 @@ function set-admin-prefix {
             if ($UserType.ForeColor -ne "Darkgreen" -and $UserType.ForeColor -ne "Orange" -and $SearchUserTextBox.Text.Length -eq 0) {
                 $BlockLabel.Text = "x"
             }
-            refresh
+            Refresh-Users
             $BlockLabel.Text = ""; $SearchUserTextBox.Focus()
         }
     }
@@ -809,7 +958,7 @@ $UsernameLabel.Text = "User"
 $UsernameLabel.FlatStyle = "Flat"
 $UsernameLabel.BackColor = "Transparent"
 $UsernameLabel.Add_Click({
-    if ($form_type -eq "test") {switchview}
+    if ($form_type -eq "test") {Switch-View}
 })
 $BottomPanel.Controls.Add($UsernameLabel)
     
@@ -826,9 +975,9 @@ $UsernameTextbox.Add_TextChanged({
     if ($BlockLabel.Text -ne "x") {
         $CurrentRoles.Rows.Clear()
         $BackupRoles.Rows.Clear()
-        check
-    } elseif ($UsernameTextbox.Text.Length -eq 0 -and $ResetRadioButton.Visible -eq $true) {check}
-    if ($UserRolesGrid.Visible -and $UsernameTextbox.Text.Length -gt 0) {memberof}
+        Check-Components
+    } elseif ($UsernameTextbox.Text.Length -eq 0 -and $ResetRadioButton.Visible -eq $true) {Check-Components}
+    if ($UserRolesGrid.Visible -and $UsernameTextbox.Text.Length -gt 0) {Fetch-Roles}
 })
 $BottomPanel.Controls.Add($UsernameTextbox)
 
@@ -873,7 +1022,7 @@ $InfoGroupButton.Add_Click({
         }
         $AllGroups.Visible = $false
         $Job = Start-Job -ScriptBlock {param($arg0); Get-ADGroupMember -Identity $arg0  | Where-Object {$_.ObjectClass -eq "User"} | Select Name, SamAccountName} -ArgumentList $GroupsTextbox.Text
-        $Stopped = while_fetching $Job $Stopwatch "info"
+        $Stopped = While-Fetch $Job $Stopwatch "info"
         $status = try{Receive-Job -Job $Job -ErrorAction Stop} catch {"$_"}
         foreach ($i in $status) {
             $AllMembers.Rows.Add($i.Name, $i.SamAccountName)
@@ -937,7 +1086,7 @@ $dgv.Add_RowStateChanged({
     }
 })
 $dgv.Add_Sorted({
-    row_colors "PaleTurquoise"
+    Set-Colors "PaleTurquoise"
 })
 $dgv.Height = $($UserGrid.Height - 20)
 $UserPropertiesGrid.Height = $($dgv.Height + 20)
@@ -1168,7 +1317,7 @@ $SearchRoleTextBox.Add_TextChanged({
 })
 $SearchRoleTextBox.Add_KeyDown({
     if ($_.KeyCode -eq "Enter"){
-        fetch_roles
+        Fetch-Roles
     }
 })
 $UserRolesGrid.Controls.Add($SearchRoleTextBox)
@@ -1187,7 +1336,7 @@ $SearchGroupEnter.Cursor = "Hand"
 $SearchGroupEnter.FlatStyle = "Flat"
 $SearchGroupEnter.BackColor = "Transparent"
 $SearchGroupEnter.Add_Click({
-    fetch_roles
+    Fetch-Roles
 })
 $SearchRoleTextBox.Controls.Add($SearchGroupEnter)
 
@@ -1278,8 +1427,8 @@ if (!(Test-Path variable:$ReloadImage)){
 $ReloadRoles.Add_Click({
     $SaveButton.Visible = $false
     $CurrentRoles.Rows.Clear()
-    memberof
-    check
+    Fetch-Roles
+    Check-Components
     $SearchRoleTextBox.Focus()
 })
 $UserRolesGrid.Controls.Add($ReloadRoles)
@@ -1301,7 +1450,7 @@ $RemoveRole.Add_Click({
     }
     $UserRolesGridStatusLabel.BackColor = "Lightgreen"
     if ($remove -eq 1) {$UserRolesGridStatusLabel.Text = "Removed $($remove) item"} else {$UserRolesGridStatusLabel.Text = "Removed $($remove) items"}
-    check
+    Check-Components
 })
 $UserRolesGrid.Controls.Add($RemoveRole)
 
@@ -1351,7 +1500,7 @@ $AddRole.Add_Click({
         $UserRolesGridStatusLabel.BackColor = "Orange"
         if ($AllRoles.SelectedRows.Count -eq 1) {$UserRolesGridStatusLabel.Text = "The item is already in the list"} else {$UserRolesGridStatusLabel.Text = "The items are already in the list"}
     }
-    check
+    Check-Components
 })
 $UserRolesGrid.Controls.Add($AddRole)
 
@@ -1554,7 +1703,7 @@ $SearchUserTextBox.Add_KeyDown({
             if ($Result -eq "Cancel") {return}
         }
         $BlockLabel.Text = "y"
-        refresh
+        Refresh-Users
         $SearchUserTextBox.SelectionStart = 0
         $SearchUserTextBox.SelectionLength = $SearchUserTextBox.Text.Length
     }
@@ -1600,7 +1749,7 @@ $SearchGroupTextBox.Add_KeyDown({
             if ($Result -eq "Cancel") {return}
         }
         $BlockLabel.Text = "y"
-        refresh_group
+        Refresh-Groups
         $BlockLabel.Text = ""
     }
 })
@@ -1630,7 +1779,7 @@ $SearchGroupEnter.Add_Click({
         }
     }
     $BlockLabel.Text = "y"
-    refresh_group
+    Refresh-Groups
     $SearchGroupTextBox.Focus()
     $BlockLabel.Text = ""
 })
@@ -1670,7 +1819,7 @@ $SearchEnterButton.Add_Click({
         }
     }
     $BlockLabel.Text = "y"
-    refresh
+    Refresh-Users
     $SearchUserTextBox.Focus()
     $BlockLabel.Text = ""
 })
@@ -1764,7 +1913,7 @@ $AdminTextBox.Add_TextChanged({
 })
 $AdminTextBox.Add_KeyDown({
     if ($_.KeyCode -eq "Enter" -and $AdminTextBox.Text.Length -gt 0){
-        set-admin-prefix
+        Set-AdminPreSuffix
         $AdminUpdateSave.Visible = $false
     }
 })
@@ -1783,7 +1932,7 @@ if ($adm.Length -gt 3) {
 }
 $SetAdminPrefixSuffixGroup.Controls.Add($LeftRadioButton)
 $LeftRadioButton.Add_Click({
-    set-admin-prefix
+    Set-AdminPreSuffix
     $AdminTextBox.Focus()
 })
 
@@ -1798,7 +1947,7 @@ if ($adm.Length -gt 3) {
 }
 $SetAdminPrefixSuffixGroup.Controls.Add($CenterRadioButton)
 $CenterRadioButton.Add_Click({
-    set-admin-prefix
+    Set-AdminPreSuffix
     $AdminTextBox.Focus()
 })
 
@@ -1814,7 +1963,7 @@ if ($adm.Length -gt 3) {
 }
 $SetAdminPrefixSuffixGroup.Controls.Add($RightRadioButton)
 $RightRadioButton.Add_Click({
-    set-admin-prefix
+    Set-AdminPreSuffix
     $AdminTextBox.Focus()
 })
     
@@ -1837,7 +1986,7 @@ $SaveButton.Font = New-Object System.Drawing.Font("Calibri",11,[System.Drawing.F
 $SaveButton.Visible = $false
 $SaveButton.FlatStyle = "Flat"
 $SaveButton.Add_Click({
-    save
+    Save-Account
 })
 $BottomPanel.Controls.Add($SaveButton)
     
@@ -1869,7 +2018,7 @@ $RestoreRadioButton.Checked = $false
 $TopPanel.Controls.Add($RestoreRadioButton)
 $RestoreRadioButton.Add_Click({
     $OldPasswordTextBox.Visible = $RestoreRadioButton.Checked
-    check
+    Check-Components
     $OldPasswordTextBox.Focus()
 })
 
@@ -1883,7 +2032,7 @@ $TopPanel.Controls.Add($ResetRadioButton)
 
 $ResetRadioButton.Add_Click({
     $OldPasswordTextBox.Visible = !$ResetRadioButton.Checked
-    check
+    Check-Components
     $NewPasswordTextBox.Focus()
 })
 
@@ -1891,7 +2040,7 @@ $PromptUser = New-Object System.Windows.Forms.CheckBox
 $PromptUser.Location = New-Object System.Drawing.Size($($ResetRadioButton.Width -13), 8)
 $PromptUser.Size = New-Object System.Drawing.Size(13,13)
 $PromptUser.Add_CheckStateChanged({
-    check
+    Check-Components
     $NewPasswordTextBox.Focus()
 })
 $ResetRadioButton.Controls.Add($PromptUser)
@@ -1905,7 +2054,7 @@ $BottomPanel.Controls.Add($EnableCheckBox)
 
 $EnableCheckBox.Add_Click({
     if ($EnableCheckBox.Text -ne ""){
-        check
+        Check-Components
     }
 })
 
@@ -1927,7 +2076,7 @@ $NewPasswordTextBox.Add_TextChanged({
         $ShowHideNewPassLabel.Visible = $false
         $NewPassLabel.Visible = $true
     }
-    check
+    Check-Components
 })
 $NewPasswordTextBox.Add_LostFocus({
     if ($NewPasswordTextBox.Text.Length -eq 0) {
@@ -1985,7 +2134,7 @@ $OldPasswordTextBox.Add_TextChanged({
         $ShowHideOldPassLabel.Visible = $false
         $OldPassLabel.Visible = $true
     }
-    check
+    Check-Components
 })
 $OldPasswordTextBox.Add_LostFocus({
     if ($OldPasswordTextBox.Text.Length -eq 0) {
@@ -2047,7 +2196,7 @@ $InfoButton.Add_Click({
         $RoleButton.Text = "R"
     }
     if($InfoButton.Text -ne "⤴") {
-        fetch_info
+        Fetch-UserInfo
         $InfoButton.Image = $null
         $InfoButton.Text = "⤴";
         $UserGrid.Visible = $UserRolesGrid.Visible = $false
@@ -2091,7 +2240,7 @@ $RoleButton.Add_Click({
         $InfoButton.Text = " I"
     }
     if($RoleButton.Text -ne "⤴") {
-        memberof
+        Fetch-Roles
         $RoleButton.ForeColor = "Blue";
         $RoleButton.Text = "⤴";
         $RoleButton.Image = $null
@@ -2138,7 +2287,7 @@ $AdminUpdateSave.FlatStyle = "Flat"
 $AdminUpdateSave.BackColor = "Transparent"
 $AdminUpdateSave.Visible = $false
 $AdminUpdateSave.Add_Click({
-    set-admin-prefix
+    Set-AdminPreSuffix
     $AdminUpdateSave.Visible = $false
 })
 $AdminTextBox.Controls.Add($AdminUpdateSave)
