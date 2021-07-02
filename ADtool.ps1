@@ -1,4 +1,4 @@
-#Created by: MennovH, 2021
+﻿#Created by: MennovH, 2021
 
 [void] [System.Reflection.Assembly]::LoadWithPartialName("System.Drawing") 
 [void] [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms")
@@ -146,7 +146,7 @@ function save {
     }
     #enable/disable user
     if ($SaveButton.Text.ToLower().Contains('able')) {
-        if ($SaveButton.Text.ToLower().Contains('disable')) {$Type = "Enable"} else {$Type = "Disable"}
+        if ($SaveButton.Text.ToLower().Contains('disable')) {$Type = "Disable"} else {$Type = "Enable"}
         switch ($Type) {
             "Enable" {$Jobs += Start-Job -Name Enable -ScriptBlock {param($User,$Domains); ForEach ($Domain in $Domains) {Enable-ADAccount -Server $Domain -Identity $User}} -ArgumentList $UsernameTextbox.Text, $Domains}
             "Disable" {$Jobs += Start-Job -Name Disable -ScriptBlock {param($User,$Domains); ForEach($Domain in $Domains) {Disable-ADAccount -Server $Domain -Identity $User}} -ArgumentList $UsernameTextbox.Text, $Domains}
@@ -154,14 +154,14 @@ function save {
         $StatusLabel.Text = "Running $($Jobs.Count) job$(if ($Jobs.Count -ne 1) {"s"})"
         $StatusLabel.Refresh()
     }
-    if ($SaveButton.Text.ToLower().Contains('unlock') -or (($NewPasswordTextBox.Text.Length -gt 0 -or $PromptUser.Checked) -and !$SaveButton.Text.ToLower().Contains('disable'))) {
+    if ((Get-ADUser -Identity $UsernameTextbox.Text -Properties LockedOut).LockedOut -eq $true -and ($SaveButton.Text.ToLower().Contains('unlock') -or (($NewPasswordTextBox.Text.Length -gt 0 -or $PromptUser.Checked) -and !$SaveButton.Text.ToLower().Contains('disable')))) {
         #unlock user
-        $Jobs += Start-Job -Name Unlock -ScriptBlock {param($User,$Domains); ForEach($Domain in $Domains) {Unlock-ADAccount -Server $Domain -Identity $User}} -ArgumentList $UsernameTextbox.Text, $Domains
-        $StatusLabel.Text = "Running $($Jobs.Count) job$(if ($Jobs.Count -ne 1) {"s"})"
-        $StatusLabel.Refresh()
         if (!$SaveButton.Text.ToLower().Contains('unlock') -or ($PromptUser.Checked -and !$SaveButton.Text.ToLower().Contains('unlock'))) {
             $Addition = " (additionally)"
         }
+        $Jobs += Start-Job -Name Unlock -ScriptBlock {param($User,$Domains); ForEach($Domain in $Domains) {Unlock-ADAccount -Server $Domain -Identity $User}} -ArgumentList $UsernameTextbox.Text, $Domains
+        $StatusLabel.Text = "Running $($Jobs.Count) job$(if ($Jobs.Count -ne 1) {"s"})"
+        $StatusLabel.Refresh()
     }
     if ($PromptUser.Checked -and $NewPasswordTextBox.Text.Length -eq 0 -and !$SaveButton.Text.ToLower().Contains('disable')) {
         $Jobs += Start-Job -Name Prompt -ScriptBlock {param($User,$Domains); ForEach ($Domain in $Domains) {Set-ADUser -Server $Domain -Identity $User -ChangePasswordAtLogon $true}} -ArgumentList $UsernameTextbox.Text, $Domains
@@ -215,7 +215,7 @@ function save {
             try{
                 Receive-Job -Job $Job -ErrorAction Stop
                 $Results.Add($Results.Count + 1,"$($Success)")
-                $Table += [Pscustomobject]@{Result = "Success";Task = "$($Description)";Error = ""}
+                $Table += [Pscustomobject]@{Result = "Success";Task = "$($Success)";Error = ""}
             } catch {
                 $Errors.Add($Errors.Count + 1, "$($Failure):`n$($_)`n")
                 $Table += [Pscustomobject]@{Result = "Fail";Task = "$($Description)";Error = "$_"}
@@ -234,11 +234,14 @@ function save {
 
     if ($status.PasswordLastSet.Length -gt 0) {
         $dgv.CurrentRow.Cells['Password expires'].Value = [datetime]($dgv.CurrentRow.Cells['Password last set'].Value).AddDays($MaxPwdAge)
-    } elseif ($status.pwdlastset -gt 0) {
+    } else { #if ($status.pwdlastset -gt 0) {
         $dgv.CurrentRow.Cells['Password expires'].Value = $Status.PasswordLastSet
-    } else {
-        $dgv.CurrentRow.Cells['Password expires'].Value = "Change at logon"
-    }
+    }# else {
+     #   $dgv.CurrentRow.Cells['Password expires'].Value = "Change at logon"
+    #}
+    $dgv.CurrentRow.Cells['Enabled'].Value = $Status.Enabled
+    if ($Status.Enabled) {$EnableCheckBox.Text = "Disable"} else {$EnableCheckBox.Text = "Enable"}
+    $EnableCheckBox.Checked = $false
     $Total = $Results.Values | Out-string
     if ($Errors.Count -gt 0 -and $Total.Length -ne 0) {$Total += "`n"}
     $Total += $Errors.Values | Out-string
@@ -498,11 +501,11 @@ function refresh {
                 if ($UserType.ForeColor -ne "Darkgreen" -and $UserType.ForeColor -ne "Orange" -and $i.SamAccountName -like $PrefixSuffix) {continue}
                 if ($i.PasswordLastSet.Length -gt 0) {
                     $dgv.Rows.Add($i.DisplayName,$i.Name,$i.SamAccountName,$i.LockedOut, $i.Enabled, [datetime]($i.PasswordLastSet).AddDays($MaxPwdAge), $i.PasswordLastSet)
-                } elseif ($pwdlastset -gt 0) {
+                } else { #if ($pwdlastset -gt 0) {
                     $dgv.Rows.Add($i.DisplayName,$i.Name,$i.SamAccountName,$i.LockedOut, $i.Enabled, $i.PasswordLastSet, $i.PasswordLastSet)
-                } else {
-                    $dgv.Rows.Add($i.DisplayName,$i.Name,$i.SamAccountName,$i.LockedOut, $i.Enabled, "Change at logon", $i.PasswordLastSet)
-                }
+                }# else {
+                 #   $dgv.Rows.Add($i.DisplayName,$i.Name,$i.SamAccountName,$i.LockedOut, $i.Enabled, "Change at logon", $i.PasswordLastSet)
+                #}
                 if ($i.PasswordExpired -or $i.pwdlastset -eq 0) {row_color "Password expires"}
                 if (!$i.Enabled) {row_color "Enabled"}
                 if ($i.LockedOut) {row_color "Locked"}
@@ -790,7 +793,7 @@ $BottomPanel.Dock = "Top"
 $BottomPanel.BackColor = "Transparent"
 $form.Controls.Add($BottomPanel)
 
-$form_type = "test"
+$form_type = ""
 if ($form_type -eq "test") {
     $UsernameLabel = New-Object System.Windows.Forms.Button
     $UsernameLabel.Location = New-Object System.Drawing.Size(0, 2)
@@ -1470,14 +1473,15 @@ $form.Controls.Add($TopPanel)
 if ($global:Domains.Count -eq 1) {$DomainComboBox = New-Object System.Windows.Forms.TextBox;$DomainComboBox.ReadOnly = $true} else {$DomainComboBox = New-Object System.Windows.Forms.ComboBox}
 $DomainComboBox.Location = New-Object System.Drawing.Size(54, 3)
 $DomainComboBox.Size = New-Object System.Drawing.Size($UsernameTextbox.Size)
-$DomainComboBox.BackColor = "Lightgray"
 if ($global:Domains.Count -ne 1) {
-if ($Domains.Count -gt 1) {$DomainComboBox.Items.Add("Entire directory") | Out-Null}
-ForEach ($Domain in $Domains) {$DomainComboBox.Items.Add($Domain) | Out-Null}
-$DomainComboBox.DropDownStyle = "dropdownlist"
+    if ($Domains.Count -gt 1) {$DomainComboBox.Items.Add("Entire directory") | Out-Null}
+    ForEach ($Domain in $Domains) {$DomainComboBox.Items.Add($Domain) | Out-Null}
+    $DomainComboBox.DropDownStyle = "dropdownlist"
     $DomainComboBox.Add_SelectedIndexChanged({
         $SearchUserTextBox.Focus()
     })
+} else {
+    $DomainComboBox.BackColor = "Lightgray"
 }
 $DomainComboBox.Text = (Get-ADDomainController -Discover -Service "PrimaryDC").Domain
 $TopPanel.Controls.Add($DomainComboBox)
@@ -1501,37 +1505,42 @@ $SearchUserTextBox.AllowDrop = $true
 $SearchUserTextBox.Add_TextChanged({
     $ClearSearch.Visible = $SearchUserTextBox.Text.Length -gt 0
     $BlockLabel.Text = "x"
-    $s = ""
-    forEach ($i in $dgv.Rows){
-        if ("$($i.Cells['Display name'].Value)".ToLower().Contains($SearchUserTextBox.Text) -or
-            "$($i.Cells['Username'].Value)".ToLower().Contains($SearchUserTextBox.Text) -or
-            "$($i.Cells['Name'].Value)".ToLower().Contains($SearchUserTextBox.Text) -or
-            $SearchUserTextBox.Text -eq ""){
-            $dgv.FirstDisplayedScrollingRowIndex = $i.Index
-            $dgv.Refresh()
-            $dgv.CurrentCell = $i.Cells['UserName']
-            $i.Selected = $true
-            $BlockLabel.Text = ""
-            $UsernameTextbox.Text = $i.Cells['Username'].Value
-            $s = "v"
-            break
+    if ($SearchUserTextBox.Text.Length -eq 0) {
+        $UsernameTextbox.Text = ""
+        $dgv.ClearSelection()
+    } else {
+        $s = ""
+        forEach ($i in $dgv.Rows){
+            if ("$($i.Cells['Display name'].Value)".ToLower().Contains($SearchUserTextBox.Text) -or
+                "$($i.Cells['Username'].Value)".ToLower().Contains($SearchUserTextBox.Text) -or
+                "$($i.Cells['Name'].Value)".ToLower().Contains($SearchUserTextBox.Text) -or
+                $SearchUserTextBox.Text -eq ""){
+                $dgv.FirstDisplayedScrollingRowIndex = $i.Index
+                $dgv.Refresh()
+                $dgv.CurrentCell = $i.Cells['UserName']
+                $i.Selected = $true
+                $BlockLabel.Text = ""
+                $UsernameTextbox.Text = $i.Cells['Username'].Value
+                $s = "v"
+                break
+            }
         }
-    }
-    if ($s -ne "v") {
-        if ($dgv.RowCount -ne 0) {
-            $dgv.ClearSelection()
-            $UsernameTextbox.Text = $InfoButton.Text = $RoleButton.Text = ""
-            if (!(Test-Path variable:$UserinfoImage)){
-                $InfoButton.Image = $UserinfoImage
-            } else {
-                $InfoButton.Text = " I"
+        if ($s -ne "v") {
+            if ($dgv.RowCount -ne 0) {
+                $dgv.ClearSelection()
+                $UsernameTextbox.Text = $InfoButton.Text = $RoleButton.Text = ""
+                if (!(Test-Path variable:$UserinfoImage)){
+                    $InfoButton.Image = $UserinfoImage
+                } else {
+                    $InfoButton.Text = " I"
+                }
+                if (!(Test-Path variable:$userrolesImage)){
+                        $RoleButton.Image = $userrolesImage
+                } else {
+                        $RoleButton.Text = "R"
+                }
+                $UserPropertiesGrid.Visible = $InfoButton.Visible = $RoleButton.Visible = $UserRolesGrid.Visible = $false; $UserGrid.Visible = $true
             }
-            if (!(Test-Path variable:$userrolesImage)){
-                    $RoleButton.Image = $userrolesImage
-            } else {
-                    $RoleButton.Text = "R"
-            }
-            $UserPropertiesGrid.Visible = $InfoButton.Visible = $RoleButton.Visible = $UserRolesGrid.Visible = $false; $UserGrid.Visible = $true
         }
     }
     $BlockLabel.Text = ""
