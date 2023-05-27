@@ -54,13 +54,13 @@ function Fetch-Users {
             ForEach ($Domain in $Domains) { `
                 Get-ADUser `
                     -Server $Domain `
-                    -Filter "GivenName -like '*' -and SamAccountName $($Type) '$($PrefixSuffix)' -and (Name -like '$($SearchVal)' -or DisplayName -like '$($SearchVal)' -or SamAccountName -like '$($SearchVal)')" `
-                    -Properties Name, DisplayName, SamAccountName, LockedOut, PasswordExpired, PasswordLastSet, GivenName, pwdlastset
+                    -Filter "SamAccountName $($Type) '$($PrefixSuffix)' -and (Name -like '$($SearchVal)' -or GivenName -like '$($SearchVal)' -or DisplayName -like '$($SearchVal)' -or EmployeeNumber -like '$($SearchVal)' -or EmployeeID -like '$($SearchVal)' -or SamAccountName -like '$($SearchVal)')" `
+                    -Properties Name, DisplayName, SamAccountName, LockedOut, PasswordExpired, PasswordLastSet, GivenName, pwdlastset, PasswordNeverExpires, WhenCreated
             }
         } -ArgumentList $Type, $PrefixSuffix, $SearchVal, $Domains
 }
 
-function Fetch-Roles {
+function Search-Roles {
     $UserRolesGrid_QueryLabel.Text = "Preparing fetch"
     $AllRoles.Rows.Clear()
     $form.Update()
@@ -77,7 +77,8 @@ function Fetch-Roles {
 
     $Job = Start-Job -ScriptBlock { `
         param($Group, $Domains)
-        ForEach ($Domain in $Domains) { `            Get-ADGroup `
+        ForEach ($Domain in $Domains) { `
+            Get-ADGroup `
                 -Filter "SamAccountName -like '$($Group)' -or Description -like '$($Group)'" `
                 -Properties SamAccountName, Description, GroupCategory, ManagedBy
             }
@@ -126,7 +127,8 @@ function Set-Password {
                 ForEach($Domain in $Domains) { `
                     Set-ADAccountPassword `
                         -Server $Domain `
-                        -Identity $User `                        -OldPassword (ConvertTo-SecureString `
+                        -Identity $User `
+                        -OldPassword (ConvertTo-SecureString `
                             -AsPlainText $Old -Force) `
                         -NewPassword (
                             ConvertTo-SecureString `
@@ -219,7 +221,7 @@ function Save-Account {
         $StatusLabel.Text = "Running $($Jobs.Count) job$(if ($Jobs.Count -ne 1) {"s"})"
         $StatusLabel.Refresh()
     }
-    if ((Get-ADUser -Identity $UsernameTextbox.Text -Properties LockedOut).LockedOut -eq $true -and ($SaveButton.Text.ToLower().Contains('unlock') -or (($NewPasswordTextBox.Text.Length -gt 0 -or $PromptUser.Checked) -and !$SaveButton.Text.ToLower().Contains('disable')))) {
+    if ((Get-ADUser -Identity $UsernameTextbox.Text -Properties LockedOut).LockedOut -eq $true -or ($SaveButton.Text.ToLower().Contains('unlock') -or (($NewPasswordTextBox.Text.Length -gt 0 -or $PromptUser.Checked) -and !$SaveButton.Text.ToLower().Contains('disable')))) {
         #unlock user
         if (!$SaveButton.Text.ToLower().Contains('unlock') -or ($PromptUser.Checked -and !$SaveButton.Text.ToLower().Contains('unlock'))) {
             $Addition = " (additionally)"
@@ -241,7 +243,8 @@ function Save-Account {
                         -Name "+$($Group)" `
                         -ScriptBlock {`
                             param($User, $Group, $Domains)
-                            ForEach ($Domain in $Domains) { `                                Add-ADGroupMember `
+                            ForEach ($Domain in $Domains) { `
+                                Add-ADGroupMember `
                                     -Server $Domain `
                                     -Identity $User `
                                     -Members $Group
@@ -250,7 +253,9 @@ function Save-Account {
                 } else {
 
                     $Jobs += Start-Job `
-                        -Name "-$($Group)" `                        -ScriptBlock { `                            param( $User, $Group, $Domains)
+                        -Name "-$($Group)" `
+                        -ScriptBlock { `
+                            param( $User, $Group, $Domains)
                             ForEach ($Domain in $Domains) {`
                                 Remove-ADGroupMember `
                                     -Server $Domain `
@@ -279,7 +284,7 @@ function Save-Account {
         if ($Job.Name.Substring(0,1) -eq "+" -or $Job.Name.Substring(0,1) -eq "-") {
             $Name = $Job.Name.Substring(1)
             try{
-                Receive-Job -Job $Job -ErrorAction Stop;
+                Receive-Job -Job $Job -Wait -ErrorAction Stop;
                 $Results.Add($Results.Count + 1,"$($Job.Name.Substring(0,1).Replace("+", "Added to").Replace("-", "Removed from ")) '$($Name)'")
                 $Table += [Pscustomobject]@{Result = "Success";Task = "$($Job.Name.Substring(0,1).Replace("+", "Added to").Replace("-", "Removed from ")) '$($Name)'";Error = ""}
             } catch {
@@ -297,7 +302,7 @@ function Save-Account {
                 "Prompt" {$Description= "$($Name) user to change password"; $Success="User will be $($Name.ToLower())ed to change password";$Failure="Failed to $($Name.ToLower()) user to change password"}
             }
             try{
-                Receive-Job -Job $Job -ErrorAction Stop
+                Receive-Job -Job $Job -Wait -ErrorAction Stop
                 $Results.Add($Results.Count + 1,"$($Success)")
                 $Table += [Pscustomobject]@{Result = "Success";Task = "$($Success)";Error = ""}
             } catch {
@@ -306,6 +311,7 @@ function Save-Account {
             }
         }
     }
+
     #get user status
     $Job = Start-Job `
         -ScriptBlock {`
@@ -315,23 +321,27 @@ function Save-Account {
                     -Server $Domain `
                     -Identity $User `
                     -Properties * | `
-                Select LockedOut, Enabled, PasswordLastSet, PasswordExpired, pwdlastset
+                Select LockedOut, Enabled, PasswordLastSet, PasswordExpired, pwdlastset, PasswordNeverExpires, WhenCreated
             }
         } -ArgumentList $UsernameTextbox.Text, $Domains | `
         Wait-Job
 
     $Status = try{Receive-Job -Job $Job -ErrorAction Stop} catch {"$_"}
-
+    write-host $Status
     $Job = (Start-Job -ScriptBlock {(Get-ADDefaultDomainPasswordPolicy).MaxPasswordAge.Days}) | Wait-Job
     $MaxPwdAge = try{Receive-Job -Job $Job -ErrorAction Stop} catch {"$_"}
 
     $dgv.CurrentRow.Cells['Locked'].Value = $Status.LockedOut
     $dgv.CurrentRow.Cells['Password last set'].Value = $Status.PasswordLastSet
 
-    if ($status.PasswordLastSet.Length -gt 0) {
-        $dgv.CurrentRow.Cells['Password expires'].Value = [datetime]($dgv.CurrentRow.Cells['Password last set'].Value).AddDays($MaxPwdAge)
+    if ($status.PasswordNeverExpires -eq 1) {
+        $dgv.CurrentRow.Cells['Password expires'].Value = $null
     } else {
-        $dgv.CurrentRow.Cells['Password expires'].Value = $Status.PasswordLastSet
+        if ($status.PasswordLastSet.Length -gt 0) {
+            $dgv.CurrentRow.Cells['Password expires'].Value = [datetime]($dgv.CurrentRow.Cells['Password last set'].Value).AddDays($MaxPwdAge)
+        } else {
+            $dgv.CurrentRow.Cells['Password expires'].Value = [datetime]($i.WhenCreated).AddDays($MaxPwdAge)
+        }
     }
     $dgv.CurrentRow.Cells['Enabled'].Value = $Status.Enabled
     if ($Status.Enabled) {$EnableCheckBox.Text = "Disable"} else {$EnableCheckBox.Text = "Enable"}
@@ -590,10 +600,12 @@ function Refresh-Users {
         if ($users) {
             foreach($i in $users) {
                 if ($UserType.ForeColor -ne "Darkgreen" -and $UserType.ForeColor -ne "Orange" -and $i.SamAccountName -like $PrefixSuffix) {continue}
-                if ($i.PasswordLastSet.Length -gt 0) {
+                if ($i.PasswordNeverExpires -eq 1) {
+                    $dgv.Rows.Add($i.DisplayName,$i.Name,$i.SamAccountName,$i.LockedOut, $i.Enabled, $null, $i.PasswordLastSet)
+                } elseif ($i.PasswordLastSet.Length -gt 0) {
                     $dgv.Rows.Add($i.DisplayName,$i.Name,$i.SamAccountName,$i.LockedOut, $i.Enabled, [datetime]($i.PasswordLastSet).AddDays($MaxPwdAge), $i.PasswordLastSet)
                 } else {
-                    $dgv.Rows.Add($i.DisplayName,$i.Name,$i.SamAccountName,$i.LockedOut, $i.Enabled, $i.PasswordLastSet, $i.PasswordLastSet)
+                    $dgv.Rows.Add($i.DisplayName,$i.Name,$i.SamAccountName,$i.LockedOut, $i.Enabled, [datetime]($i.WhenCreated).AddDays($MaxPwdAge), $i.PasswordLastSet)
                 }
                 if ($i.PasswordExpired -or $i.pwdlastset -eq 0) {Set-Color "Password expires"}
                 if (!$i.Enabled) {Set-Color "Enabled"}
@@ -604,6 +616,7 @@ function Refresh-Users {
             }
         }
     }
+
     $Stopwatch.Stop()
     $time = $($Stopwatch.Elapsed.Minutes * 60 + $Stopwatch.Elapsed.Seconds)
     if ($time -eq 1) {$time = "$($time) second"} else {$time = "$($time) seconds"}
@@ -1317,7 +1330,7 @@ $SearchRoleTextBox.Add_TextChanged({
 })
 $SearchRoleTextBox.Add_KeyDown({
     if ($_.KeyCode -eq "Enter"){
-        Fetch-Roles
+        Search-Roles
     }
 })
 $UserRolesGrid.Controls.Add($SearchRoleTextBox)
@@ -1336,7 +1349,7 @@ $SearchGroupEnter.Cursor = "Hand"
 $SearchGroupEnter.FlatStyle = "Flat"
 $SearchGroupEnter.BackColor = "Transparent"
 $SearchGroupEnter.Add_Click({
-    Fetch-Roles
+    Search-Roles
 })
 $SearchRoleTextBox.Controls.Add($SearchGroupEnter)
 
@@ -1755,20 +1768,20 @@ $SearchGroupTextBox.Add_KeyDown({
 })
 $TopPanel.Controls.Add($SearchGroupTextBox)
 
-$SearchGroupEnter= New-Object System.Windows.Forms.Label
-$SearchGroupEnter.Location = New-Object System.Drawing.Size($($SearchGroupTextBox.Width - $SearchUserTextBox.Height))
-$SearchGroupEnter.Size = New-Object System.Drawing.Size($SearchUserTextBox.Height, $SearchUserTextBox.Height)
-$SearchGroupEnter.Font = New-Object System.Drawing.Font("Calibri Light",13,[System.Drawing.FontStyle]::Bold)
+$SearchGroupEnter2= New-Object System.Windows.Forms.Label
+$SearchGroupEnter2.Location = New-Object System.Drawing.Size($($SearchGroupTextBox.Width - $SearchUserTextBox.Height))
+$SearchGroupEnter2.Size = New-Object System.Drawing.Size($SearchUserTextBox.Height, $SearchUserTextBox.Height)
+$SearchGroupEnter2.Font = New-Object System.Drawing.Font("Calibri Light",13,[System.Drawing.FontStyle]::Bold)
 if (!(Test-Path variable:$SearchImage)){
-    $SearchGroupEnter.Image = $SearchImage
+    $SearchGroupEnter2.Image = $SearchImage
 } else {
-    $SearchGroupEnter.Text = "⌕"
+    $SearchGroupEnter2.Text = "⌕"
 }
-$SearchGroupEnter.Image = $searchImage
-$SearchGroupEnter.Cursor = "Hand"
-$SearchGroupEnter.FlatStyle = "Flat"
-$SearchGroupEnter.BackColor = "Transparent"
-$SearchGroupEnter.Add_Click({
+$SearchGroupEnter2.Image = $searchImage
+$SearchGroupEnter2.Cursor = "Hand"
+$SearchGroupEnter2.FlatStyle = "Flat"
+$SearchGroupEnter2.BackColor = "Transparent"
+$SearchGroupEnter2.Add_Click({
     if ($SearchGroupTextBox.Text.Length -lt 3) {
         $MessageBody = "This query could take more than 2 minutes!`n`nContinue?"
         $MessageTitle = "Confirm choice"
@@ -1783,7 +1796,7 @@ $SearchGroupEnter.Add_Click({
     $SearchGroupTextBox.Focus()
     $BlockLabel.Text = ""
 })
-$SearchGroupTextBox.Controls.Add($SearchGroupEnter)
+$SearchGroupTextBox.Controls.Add($SearchGroupEnter2)
 
 if($SearchGroupTextBox.CanFocus){
     $SearchGroupTextBox.Focus()
@@ -2320,7 +2333,7 @@ $ToolTip.SetToolTip($CopyButton, "Copy value")
 $ToolTip.SetToolTip($PasteButton, "Paste value")
 $ToolTip.SetToolTip($RoleButton, "Show user roles")
 $ToolTip.SetToolTip($ShowCategory, "Show/hide category")
-$ToolTip.SetToolTip($UserType, "Filter on admins")
+$ToolTip.SetToolTip($UserType, "Click to filter on admins`nDouble click to edit prefix")
 
 $ToolTip.OwnerDraw = $true
 $ToolTip_Draw=[System.Windows.Forms.DrawToolTipEventHandler]{
